@@ -2,6 +2,10 @@ name: Replay c4 k2 continuous bulk construction
 run-name: Realize every controlled border path with physical bulk moves
 
 on:
+  # Bootstrap this research workflow before the draft PR reaches main.
+  push:
+    branches: [agent/minimum-height-five]
+    paths: [.github/workflows/c4-continuous.yml]
   workflow_dispatch:
     inputs:
       source_run:
@@ -35,7 +39,7 @@ jobs:
       - name: Build replay matrix
         id: matrix
         env:
-          SHARDS: ${{ inputs.shards }}
+          SHARDS: ${{ inputs.shards || '8' }}
         run: |
           echo "matrix=$(jq -cn --argjson count "$SHARDS" '[range(0; $count)]')" >> "$GITHUB_OUTPUT"
           echo "shards=$SHARDS" >> "$GITHUB_OUTPUT"
@@ -46,7 +50,7 @@ jobs:
           path: source/inputs
           github-token: ${{ secrets.GITHUB_TOKEN }}
           repository: ${{ github.repository }}
-          run-id: ${{ inputs.source_run }}
+          run-id: ${{ inputs.source_run || '31333399467' }}
       - name: Download both compressed policies
         uses: actions/download-artifact@v6
         with:
@@ -54,7 +58,7 @@ jobs:
           path: source/policies
           github-token: ${{ secrets.GITHUB_TOKEN }}
           repository: ${{ github.repository }}
-          run-id: ${{ inputs.source_run }}
+          run-id: ${{ inputs.source_run || '31333399467' }}
       - name: Build, test, and bundle exact inputs
         run: |
           tar -xzf source/inputs/depth-attack-inputs.tar.gz -C source/inputs
