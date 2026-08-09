@@ -195,12 +195,15 @@ that no initial observation can reach.
 | 3 | 458 | 3,188 | 7 | 0 |
 | 4 | 8,367 | 152,079 | 474 | 0 |
 | 5 | 68,396 | 2,545,120 | 16,026 | 0 |
+| 6 | 361,334 | 23,460,258 | 231,105 | 0 |
 
 The losing reachable observations are real local obstructions, but the
 retrograde strategy avoids them from every enumerated initial observation.
 In particular, committing all four next runs removes the `h=5` obstruction of
 the `q`-only mode.  A complete optimized `h=5` run takes about 75 seconds and
 258 MB in the current WSL/GCC build; `h=4` takes about three seconds and 36 MB.
+The complete `h=6` GitHub Actions run took about six minutes including build
+and tests.
 
 These are complete finite-height results only.  They neither prove that the
 same controller wins at `h=6` and beyond nor establish an induction that

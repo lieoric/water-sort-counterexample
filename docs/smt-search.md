@@ -14,10 +14,18 @@ state cannot reach the exhausted-column frontier.  In the four-color,
 two-empty case the frontier is two exhausted original columns.
 
 Global color relabeling fixes the first sorted column's bottom item to color
-zero; full columns are sorted lexicographically.  This symmetry-reduced
-covering is partitioned into disjoint shards by the base-`c` code of the first
-column after omitting its already-fixed bottom zero.  Omitting that constant
-digit prevents power-of-`c` shard counts from creating mostly empty jobs.
+zero; full columns are sorted lexicographically.  Colors also obey the
+restricted-growth convention: the first occurrence of color `q-1` precedes
+the first occurrence of color `q`.  A lexicographically least representative
+of every combined color/column orbit has all three properties.  This
+symmetry-reduced covering is partitioned into disjoint shards by the residue
+of a mixed linear hash over the complete flattened arrangement.  Its
+coefficients come from a fixed full-period linear congruential sequence.  This
+sequence has full period for the workflow's supported power-of-two shard
+counts, keeping those shards balanced even though the first color is fixed and
+the remaining colors obey restricted growth.  The hash is used only as a
+congruence partition: every satisfying assignment belongs to exactly one
+shard, so the shards remain disjoint and exhaustive.
 Consequently, all shards together cover the fixed-height universe even though
 they solve independently.
 

@@ -318,10 +318,11 @@ The remaining all-height question is also attacked as a bounded counter game.
 Bare `Q=(z,a_i,s_i,d_c)` observations first lose at height 5, proving that
 those counters alone cannot support one online controller. If every column's
 next maximal color run is committed and visible before source choice, the
-exact game has no losing initial observation through height 5. At height 5
-this closes 2,545,120 reachable observations; 16,026 losing local states are
-all avoidable from every initial observation. These are finite-height policy
-results, not a Water NO certificate or an induction over arbitrary heights.
+exact game has no losing initial observation through height 6. At height 6
+this closes 23,460,258 reachable observations; 231,105 losing local states are
+all avoidable from all 361,334 initial observations. These are finite-height
+policy results, not a Water NO certificate or an induction over arbitrary
+heights.
 See [the bounded counter-game definition and results](docs/counter-game.md).
 
 A complementary [joint SMT encoding](docs/smt-search.md) searches a complete

@@ -31,11 +31,12 @@ def main() -> int:
         if status not in statuses:
             raise SystemExit(f"unexpected solver status: {status}")
         statuses[status] += 1
-    metadata = {(r["height"], r["colors"], r["empty_columns"], r["shards"])
+    metadata = {(r["height"], r["colors"], r["empty_columns"], r["shards"],
+                 r["partition_scheme"])
                 for r in reports}
     if len(metadata) != 1:
         raise SystemExit("shard metadata mismatch")
-    height, colors, empty, shards = metadata.pop()
+    height, colors, empty, shards, partition_scheme = metadata.pop()
     if shards != options.shards:
         raise SystemExit("declared shard count mismatch")
 
@@ -51,6 +52,7 @@ def main() -> int:
         "colors": colors,
         "empty_columns": empty,
         "shards": options.shards,
+        "partition_scheme": partition_scheme,
         "statuses": statuses,
         "conclusion": conclusion,
         "build_seconds_sum": round(sum(r["build_seconds"] for r in reports), 3),

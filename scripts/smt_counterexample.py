@@ -95,15 +95,28 @@ def main() -> int:
     solver.add(item[0][0] == 0)
     for column in range(columns - 1):
         solver.add(lex_leq(item[column], item[column + 1]))
+    flattened = list(itertools.chain.from_iterable(item))
+    for index, value in enumerate(flattened):
+        for color in range(1, colors):
+            solver.add(Implies(
+                value == color,
+                Or(*(earlier == color - 1
+                     for earlier in flattened[:index]))))
 
-    # item[0][0] is fixed to zero above, so omit that constant base-c digit.
-    # Keeping it would make most power-of-c congruence shards empty.  The
-    # suffix code still partitions the covering into disjoint exhaustive
-    # congruence classes while using every practical shard.
-    first_column_suffix_code = Sum(*(
-        item[0][position] * (colors ** (position - 1))
-        for position in range(1, height)))
-    solver.add(first_column_suffix_code % options.shards == options.shard)
+    # A power-of-c code interacts badly with the fixed zero and restricted-
+    # growth prefix when the shard count is a power of c.  Use a deterministic
+    # full-period LCG to generate mixed linear coefficients instead.  Every
+    # assignment still belongs to exactly one congruence shard, while practical
+    # power-of-two shard counts remain balanced.
+    coefficient = 1 % options.shards
+    coefficients = []
+    for _ in flattened:
+        coefficient = (5 * coefficient + 1) % options.shards
+        coefficients.append(coefficient)
+    partition_code = Sum(*(coefficient * value
+                           for coefficient, value in
+                           zip(coefficients, flattened)))
+    solver.add(partition_code % options.shards == options.shard)
 
     boundary = [[True] + [item[column][position - 1] !=
                            item[column][position]
@@ -199,6 +212,7 @@ def main() -> int:
         "target_exhausted_columns": target_exhausted,
         "shard": options.shard,
         "shards": options.shards,
+        "partition_scheme": "lcg-mixed-flat-linear-v1",
         "top_border_position_states": len(states),
         "timeout_ms": options.timeout_ms,
         "build_seconds": round(built_seconds, 3),
