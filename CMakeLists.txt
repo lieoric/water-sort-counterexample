@@ -165,6 +165,8 @@ if(BUILD_TESTING)
             --scale 6
             --window 6
             --goal-exhausted 2)
+    set_tests_properties(water-depth-obstruction PROPERTIES
+        PASS_REGULAR_EXPRESSION "\"run_scenes_equal\": false")
     function(add_universe_regression NAME HEIGHT COLORS EMPTY CLASSES UNSOLVABLE)
         add_test(NAME ${NAME}
             COMMAND water-universe

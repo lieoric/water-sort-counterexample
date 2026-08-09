@@ -129,7 +129,8 @@ under `experiments/`.
   controller over an exact catalog, checking only the states induced by that
   controller.
 - `water-unit-scenes`: expansion of controlled border choices into one-item
-  moves, comparing finite top-item observation windows 2 through 6.
+  moves, comparing finite top-item windows, top color-run windows, and
+  color-run windows augmented by bounded Ito buffer-demand counters.
 - `water-depth-witness`: independent verification of a scalable pair of tight
   states with identical bounded observations and disjoint safe actions.
 - A literal full-state Water BFS with forced bulk moves and locked completed
@@ -265,9 +266,10 @@ Expand those macro choices into one-item moves and compare observation windows:
 ```
 
 The unit-scene report intersects safe next moves for equal labeled-stack
-signatures at windows 2 through 6. Each border action is physically valid and
-is expanded completely, but the next macro state is rebuilt in canonical tight
-form. Thus this diagnoses a candidate small finite program while explicitly
+signatures at item windows 2 through 6, run windows 1 through 4, and the same
+run windows with buffer-demand fields. Each border action is physically valid
+and is expanded completely, but the next macro state is rebuilt in canonical
+tight form. Thus this diagnoses a candidate small finite program while explicitly
 counting the still-unproved connections between macro traces. See [the
 thin-layer policy design](docs/thin-layer-policy-learning.md).
 

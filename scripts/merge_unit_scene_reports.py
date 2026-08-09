@@ -39,11 +39,11 @@ def merge_scene(aggregate: dict, incoming: dict) -> None:
                 break
 
 
-def write_scenes(output: Path, window: int, scenes: dict[str, dict]) -> int:
+def write_scenes(output: Path, label: str, scenes: dict[str, dict]) -> int:
     header = "occurrences\tcommon_safe\tobserved_safe\twitnesses\tsignature\n"
     conflicts = 0
-    with (output / f"scenes-w{window}.tsv").open("w", encoding="utf-8") as all_rows, (
-        output / f"conflicts-w{window}.tsv"
+    with (output / f"scenes-{label}.tsv").open("w", encoding="utf-8") as all_rows, (
+        output / f"conflicts-{label}.tsv"
     ).open("w", encoding="utf-8") as conflict_rows:
         all_rows.write(header)
         conflict_rows.write(header)
@@ -113,7 +113,11 @@ def main() -> None:
     args = parser.parse_args()
 
     reports = []
-    by_window = {2: {}, 3: {}, 4: {}, 5: {}, 6: {}}
+    scene_sets = {
+        **{f"w{window}": {} for window in range(2, 7)},
+        **{f"r{window}": {} for window in range(1, 5)},
+        **{f"rd{window}": {} for window in range(1, 5)},
+    }
     exception_counts: dict[str, int] = {}
     occurrence_rows = []
     for report_path in sorted(args.input.rglob("report.json")):
@@ -121,14 +125,14 @@ def main() -> None:
         if "retightening_gaps" not in report:
             continue
         reports.append(report)
-        for window in by_window:
+        for label in scene_sets:
             for signature, incoming in read_scenes(
-                report_path.with_name(f"scenes-w{window}.tsv")
+                report_path.with_name(f"scenes-{label}.tsv")
             ).items():
-                if signature not in by_window[window]:
-                    by_window[window][signature] = incoming
+                if signature not in scene_sets[label]:
+                    scene_sets[label][signature] = incoming
                 else:
-                    merge_scene(by_window[window][signature], incoming)
+                    merge_scene(scene_sets[label][signature], incoming)
 
         with report_path.with_name("exception_coverage.tsv").open(
             encoding="utf-8"
@@ -163,11 +167,15 @@ def main() -> None:
 
     args.output.mkdir(parents=True, exist_ok=True)
     conflicts = {
-        window: write_scenes(args.output, window, scenes)
-        for window, scenes in by_window.items()
+        label: write_scenes(args.output, label, scenes)
+        for label, scenes in scene_sets.items()
     }
     refinements = {
-        window: write_refinements(args.output, by_window, window)
+        window: write_refinements(
+            args.output,
+            {depth: scene_sets[f"w{depth}"] for depth in range(2, 7)},
+            window,
+        )
         for window in (3, 4, 5)
     }
     with (args.output / "exception_coverage.tsv").open(
@@ -203,16 +211,8 @@ def main() -> None:
         "exception_signatures": len(exception_counts),
         "witnessed_exceptions": sum(1 for count in exception_counts.values() if count),
         "exception_occurrences": sum(exception_counts.values()),
-        "scenes_w2": len(by_window[2]),
-        "scenes_w3": len(by_window[3]),
-        "scenes_w4": len(by_window[4]),
-        "scenes_w5": len(by_window[5]),
-        "scenes_w6": len(by_window[6]),
-        "conflicts_w2": conflicts[2],
-        "conflicts_w3": conflicts[3],
-        "conflicts_w4": conflicts[4],
-        "conflicts_w5": conflicts[5],
-        "conflicts_w6": conflicts[6],
+        **{f"scenes_{label}": len(scenes) for label, scenes in scene_sets.items()},
+        **{f"conflicts_{label}": count for label, count in conflicts.items()},
         "w3_conflict_refinements_w4": refinements[3][0],
         "w3_conflict_refinement_conflicts_w4": refinements[3][1],
         "w4_conflict_refinements_w5": refinements[4][0],
@@ -243,6 +243,14 @@ def main() -> None:
 - Window 4: {totals['scenes_w4']} scenes, **{totals['conflicts_w4']} conflicts**
 - Window 5: {totals['scenes_w5']} scenes, **{totals['conflicts_w5']} conflicts**
 - Window 6: {totals['scenes_w6']} scenes, **{totals['conflicts_w6']} conflicts**
+- Top 1 run: {totals['scenes_r1']} scenes, **{totals['conflicts_r1']} conflicts**
+- Top 2 runs: {totals['scenes_r2']} scenes, **{totals['conflicts_r2']} conflicts**
+- Top 3 runs: {totals['scenes_r3']} scenes, **{totals['conflicts_r3']} conflicts**
+- Top 4 runs: {totals['scenes_r4']} scenes, **{totals['conflicts_r4']} conflicts**
+- Top 1 run + demand: {totals['scenes_rd1']} scenes, **{totals['conflicts_rd1']} conflicts**
+- Top 2 runs + demand: {totals['scenes_rd2']} scenes, **{totals['conflicts_rd2']} conflicts**
+- Top 3 runs + demand: {totals['scenes_rd3']} scenes, **{totals['conflicts_rd3']} conflicts**
+- Top 4 runs + demand: {totals['scenes_rd4']} scenes, **{totals['conflicts_rd4']} conflicts**
 - The {totals['conflicts_w3']} ambiguous window-3 scenes split into
   {totals['w3_conflict_refinements_w4']} window-4 refinements, with
   **{totals['w3_conflict_refinement_conflicts_w4']} remaining conflicts**
@@ -253,12 +261,14 @@ def main() -> None:
   {totals['w5_conflict_refinements_w6']} window-6 refinements, with
   **{totals['w5_conflict_refinement_conflicts_w6']} remaining conflicts**
 
-Every selected border removal is expanded into legal one-item moves from a
-canonical tight representative. The representative is rebuilt at the next
-macro checkpoint, producing {totals['retightening_gaps']} explicit connection
-gaps. Therefore zero sampled scene conflicts would support a candidate local
-rule, but would not yet prove a continuous physical controller or all-height
-closure.
+The run signatures look through arbitrarily long monochrome blocks. The
+run-plus-demand signatures additionally record the bounded Ito buffer deficit
+of each color and candidate source. Every selected border removal is expanded
+into legal one-item moves from a canonical tight representative. The
+representative is rebuilt at the next macro checkpoint, producing
+{totals['retightening_gaps']} explicit connection gaps. Therefore zero sampled
+scene conflicts would support a candidate counter controller, but would not
+yet prove a continuous physical controller or all-height closure.
 """
     (args.output / "summary.md").write_text(summary, encoding="utf-8")
     print(summary)

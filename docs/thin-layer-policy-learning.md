@@ -136,6 +136,26 @@ is `D = 6`. Smaller catalogs gave minima 4 and 5; the minimum increased when
 hidden-tail completions from different height ranges were required to share
 one controller.
 
+### Color-run and demand observations
+
+A fixed item window cannot be universal because an arbitrarily long top run
+can hide the next color boundary. The unit-scene analyzer therefore also emits
+two height-independent candidate families:
+
+- `r1` through `r4` expose the top one through four monochrome runs of every
+  physical stack, without recording their lengths;
+- `rd1` through `rd4` add the current number of monochrome buffers, each
+  color's bounded deficit/host flag, and the bounded buffer demand of every
+  candidate original source.
+
+All demand fields are exactly the quantities used by Ito's border-removal
+condition and are capped above the largest relevant buffer count. Scaling all
+run lengths leaves them unchanged. Equal signatures are still merged by
+intersecting exact safe unit actions, so a zero intersection is a concrete
+attack on the proposed observation. A conflict-free finite catalog remains a
+conjecture generator: the eventual proof must establish symbolic closure and
+replace every canonical retightening gap by a continuous construction.
+
 These are exact intersections for the finite catalog and the chosen canonical
 tight representatives, not an all-height theorem. There are 232,753 explicit
 connections still to replace with continuous physical traces or a general

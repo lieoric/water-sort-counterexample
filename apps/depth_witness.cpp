@@ -27,10 +27,12 @@ struct Options {
     std::uint32_t goal_exhausted = 2;
     std::uint32_t scale = 1;
     std::uint32_t window = 1;
+    std::uint32_t run_window = 2;
 };
 
 struct Witness {
     std::string scene;
+    std::string run_scene;
     std::uint64_t safe_sources = 0;
     std::uint64_t safe_units = 0;
     PhysicalState physical;
@@ -203,6 +205,48 @@ std::string scene_signature(const PhysicalState& state,
     return output.str();
 }
 
+std::string run_scene_signature(const PhysicalState& state,
+                                const std::vector<std::uint32_t>& ranks,
+                                std::uint32_t colors,
+                                std::uint32_t height,
+                                std::uint32_t window) {
+    std::vector<std::uint32_t> color_map(colors);
+    std::iota(color_map.begin(), color_map.end(), 0U);
+    std::string best;
+    bool have_best = false;
+    do {
+        std::ostringstream output;
+        output << "qI|";
+        for (std::size_t index = 0; index < state.size(); ++index) {
+            if (index != 0) output << '/';
+            const auto& column = state[index];
+            char status = 'p';
+            if (column.empty()) status = 'e';
+            else if (column.size() == height && is_monochrome(column)) status = 'l';
+            else if (column.size() == height) status = 'f';
+            const auto mixed = index < ranks.size() && ranks[index] != 0;
+            output << index << ':' << (mixed ? 'b' : 'm') << status << ':';
+
+            auto cursor = column.size();
+            std::uint32_t runs = 0;
+            while (cursor != 0 && runs < window) {
+                const auto color = column[cursor - 1];
+                output << water_sort::color_to_char(static_cast<water_sort::Color>(
+                    color_map[color]));
+                while (cursor != 0 && column[cursor - 1] == color) --cursor;
+                ++runs;
+            }
+            output << (cursor != 0 ? '+' : '.');
+        }
+        auto signature = output.str();
+        if (!have_best || signature < best) {
+            best = std::move(signature);
+            have_best = true;
+        }
+    } while (std::next_permutation(color_map.begin(), color_map.end()));
+    return best;
+}
+
 void validate_scaled_physical(const water_sort::Instance& instance,
                               const water_sort::PolicyStateView& view,
                               const PhysicalState& physical) {
@@ -282,6 +326,8 @@ Witness analyze(const std::filesystem::path& path,
     }
     return {scene_signature(scaled_physical, scaled_view.ranks, scaled.color_count,
                             scaled.height, options.window),
+            run_scene_signature(scaled_physical, scaled_view.ranks, scaled.color_count,
+                                scaled.height, options.run_window),
             scaled_table.safe_columns[state_id], scaled_units, scaled_physical};
 }
 
@@ -306,18 +352,19 @@ Options parse_options(int argc, char** argv) {
         else if (argument == "--goal-exhausted") options.goal_exhausted = std::stoul(value());
         else if (argument == "--scale") options.scale = std::stoul(value());
         else if (argument == "--window") options.window = std::stoul(value());
+        else if (argument == "--run-window") options.run_window = std::stoul(value());
         else if (argument == "--out") options.out = value();
         else if (argument == "--help") {
             std::cout << "water-depth-witness --left FILE --left-state N "
                          "--right FILE --right-state N --scale L --window D "
-                         "[--goal-exhausted N] [--out FILE]\n";
+                         "[--run-window R] [--goal-exhausted N] [--out FILE]\n";
             std::exit(0);
         } else {
             throw std::runtime_error("unknown option: " + argument);
         }
     }
     if (options.left.empty() || options.right.empty() || options.scale == 0 ||
-        options.window == 0 || options.goal_exhausted == 0) {
+        options.window == 0 || options.run_window == 0 || options.goal_exhausted == 0) {
         throw std::runtime_error("invalid depth-witness options");
     }
     return options;
@@ -345,6 +392,11 @@ int main(int argc, char** argv) try {
            << "  \"left_safe_units\": \"" << hex_mask(left.safe_units) << "\",\n"
            << "  \"right_safe_units\": \"" << hex_mask(right.safe_units) << "\",\n"
            << "  \"common_safe_units\": \"0x0\",\n"
+           << "  \"run_window\": " << options.run_window << ",\n"
+           << "  \"run_scenes_equal\": "
+           << (left.run_scene == right.run_scene ? "true" : "false") << ",\n"
+           << "  \"left_run_scene\": \"" << left.run_scene << "\",\n"
+           << "  \"right_run_scene\": \"" << right.run_scene << "\",\n"
            << "  \"scene\": \"" << left.scene << "\"\n"
            << "}\n";
     if (!options.out.empty()) {

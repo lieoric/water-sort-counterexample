@@ -111,6 +111,14 @@ items and the listed finite flags. It does **not** rule out:
 - a continuous retightening algorithm that carries additional finite control
   state between macro actions.
 
+In particular, this obstruction does not survive unchanged when the observer
+looks through a whole monochrome run instead of counting individual items.
+`water-depth-witness` verifies that the two committed witnesses have different
+top-two-run observations, even after scaling makes any prescribed finite item
+window identical. This motivates treating color boundaries as the structural
+units and adding only the bounded buffer-demand counters used by the exact
+oracle.
+
 The current unit-scene runs rebuild a canonical tight representative between
 macro checkpoints. Consequently, the finite sampled minimum (`D = 6` on the
 combined height-4-through-46 catalog) is a property of those sampled

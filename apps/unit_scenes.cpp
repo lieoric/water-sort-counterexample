@@ -440,6 +440,101 @@ std::string unit_scene(const PhysicalState& state,
     return output.str();
 }
 
+struct TopRun {
+    water_sort::Color color = 0;
+    std::size_t length = 0;
+};
+
+std::vector<TopRun> top_runs(const Column& column, std::uint32_t window) {
+    std::vector<TopRun> result;
+    auto cursor = column.size();
+    while (cursor != 0 && result.size() < window) {
+        const auto color = column[cursor - 1];
+        std::size_t length = 0;
+        while (cursor != 0 && column[cursor - 1] == color) {
+            --cursor;
+            ++length;
+        }
+        result.push_back({color, length});
+    }
+    return result;
+}
+
+std::uint32_t ceil_div(std::uint32_t numerator, std::uint32_t denominator) {
+    return numerator == 0 ? 0 : 1 + (numerator - 1) / denominator;
+}
+
+std::string run_scene(const PhysicalState& state,
+                      const std::vector<std::uint8_t>& mixed,
+                      const water_sort::PolicyStateView& view,
+                      std::uint32_t run_window,
+                      bool with_demand,
+                      bool active,
+                      std::size_t active_source,
+                      std::uint32_t colors,
+                      std::uint32_t empty_columns,
+                      std::uint32_t height) {
+    std::vector<std::uint32_t> color_map(colors);
+    std::iota(color_map.begin(), color_map.end(), 0U);
+    std::string best;
+    bool have_best = false;
+    const auto need_cap = colors + empty_columns + 1U;
+
+    do {
+        std::ostringstream output;
+        output << (active ? "qA" : "qI");
+        if (active) output << "s" << active_source;
+        if (with_demand) {
+            output << "|a" << view.available_buffers << "|c";
+            for (std::uint32_t canonical = 0; canonical < colors; ++canonical) {
+                std::uint32_t original = 0;
+                while (color_map[original] != canonical) ++original;
+                const auto deficit = view.f[original] > view.g[original]
+                    ? ceil_div(view.f[original] - view.g[original], height)
+                    : 0U;
+                output << 'd' << std::min(deficit, need_cap)
+                       << (view.g[original] > 0 ? 'h' : '-');
+            }
+        }
+        output << '|';
+
+        for (std::size_t index = 0; index < state.size(); ++index) {
+            if (index != 0) output << '/';
+            const auto& column = state[index];
+            char status = 'p';
+            if (column.empty()) status = 'e';
+            else if (column.size() == height && is_monochrome(column)) status = 'l';
+            else if (column.size() == height) status = 'f';
+            output << index << ':' << (mixed[index] != 0 ? 'b' : 'm') << status;
+            if (with_demand && index < view.columns.size()) {
+                const auto& source = view.columns[index];
+                output << (source.remaining_borders == 0 ? ":x" : ":n");
+                if (source.remaining_borders != 0) {
+                    output << std::min(source.buffers_needed, need_cap);
+                }
+            }
+            output << ':';
+
+            const auto runs = top_runs(column, run_window);
+            std::size_t visible_items = 0;
+            for (const auto& run : runs) {
+                visible_items += run.length;
+                output << water_sort::color_to_char(static_cast<water_sort::Color>(
+                    color_map[run.color]));
+            }
+            output << (visible_items < column.size() ? '+' : '.');
+        }
+
+        auto signature = output.str();
+        if (!have_best || signature < best) {
+            best = std::move(signature);
+            have_best = true;
+        }
+    } while (std::next_permutation(color_map.begin(), color_map.end()));
+
+    return best;
+}
+
 void add_scene(std::unordered_map<std::string, Aggregate>& scenes,
                std::string signature,
                std::uint64_t safe_actions,
@@ -459,7 +554,7 @@ std::string hex_mask(std::uint64_t mask) {
 }
 
 void write_scenes(const std::filesystem::path& out,
-                  std::uint32_t window,
+                  const std::string& label,
                   const std::unordered_map<std::string, Aggregate>& scenes) {
     std::vector<std::string> signatures;
     signatures.reserve(scenes.size());
@@ -468,8 +563,8 @@ void write_scenes(const std::filesystem::path& out,
         signatures.push_back(signature);
     }
     std::sort(signatures.begin(), signatures.end());
-    std::ofstream all(out / ("scenes-w" + std::to_string(window) + ".tsv"));
-    std::ofstream conflicts(out / ("conflicts-w" + std::to_string(window) + ".tsv"));
+    std::ofstream all(out / ("scenes-" + label + ".tsv"));
+    std::ofstream conflicts(out / ("conflicts-" + label + ".tsv"));
     const std::string header = "occurrences\tcommon_safe\tobserved_safe\twitnesses\tsignature\n";
     all << header;
     conflicts << header;
@@ -537,6 +632,8 @@ int main(int argc, char** argv) try {
     }
 
     std::array<std::unordered_map<std::string, Aggregate>, 5> scenes;
+    std::array<std::unordered_map<std::string, Aggregate>, 4> run_scenes;
+    std::array<std::unordered_map<std::string, Aggregate>, 4> demand_run_scenes;
     Totals totals;
     std::filesystem::create_directories(options.out);
     std::ofstream occurrences(options.out / "exception_occurrences.tsv");
@@ -592,6 +689,20 @@ int main(int argc, char** argv) try {
                                          model.instance.color_count, model.instance.height),
                               safe_starts, witness);
                 }
+                for (std::uint32_t window = 1; window <= 4; ++window) {
+                    add_scene(run_scenes[window - 1],
+                              run_scene(physical, mixed, view, window, false, false,
+                                        source, model.instance.color_count,
+                                        model.instance.empty_columns,
+                                        model.instance.height),
+                              safe_starts, witness);
+                    add_scene(demand_run_scenes[window - 1],
+                              run_scene(physical, mixed, view, window, true, false,
+                                        source, model.instance.color_count,
+                                        model.instance.empty_columns,
+                                        model.instance.height),
+                              safe_starts, witness);
+                }
 
                 auto chosen_unit_actions = legal_unit_actions(
                     physical, source, model.instance.height);
@@ -615,6 +726,20 @@ int main(int argc, char** argv) try {
                                   unit_scene(physical, mixed, window, true, source,
                                              model.instance.color_count,
                                              model.instance.height),
+                                  safe_units, active_witness);
+                    }
+                    for (std::uint32_t window = 1; window <= 4; ++window) {
+                        add_scene(run_scenes[window - 1],
+                                  run_scene(physical, mixed, view, window, false, true,
+                                            source, model.instance.color_count,
+                                            model.instance.empty_columns,
+                                            model.instance.height),
+                                  safe_units, active_witness);
+                        add_scene(demand_run_scenes[window - 1],
+                                  run_scene(physical, mixed, view, window, true, true,
+                                            source, model.instance.color_count,
+                                            model.instance.empty_columns,
+                                            model.instance.height),
                                   safe_units, active_witness);
                     }
                     const auto unit_action = first_action(safe_units);
@@ -661,10 +786,24 @@ int main(int argc, char** argv) try {
     }
 
     std::array<std::size_t, 5> conflicts{};
+    std::array<std::size_t, 4> run_conflicts{};
+    std::array<std::size_t, 4> demand_run_conflicts{};
     for (std::uint32_t window = 2; window <= 6; ++window) {
-        write_scenes(options.out, window, scenes[window - 2]);
+        write_scenes(options.out, "w" + std::to_string(window), scenes[window - 2]);
         conflicts[window - 2] = static_cast<std::size_t>(std::count_if(
             scenes[window - 2].begin(), scenes[window - 2].end(),
+            [](const auto& item) { return item.second.common_safe == 0; }));
+    }
+    for (std::uint32_t window = 1; window <= 4; ++window) {
+        write_scenes(options.out, "r" + std::to_string(window),
+                     run_scenes[window - 1]);
+        write_scenes(options.out, "rd" + std::to_string(window),
+                     demand_run_scenes[window - 1]);
+        run_conflicts[window - 1] = static_cast<std::size_t>(std::count_if(
+            run_scenes[window - 1].begin(), run_scenes[window - 1].end(),
+            [](const auto& item) { return item.second.common_safe == 0; }));
+        demand_run_conflicts[window - 1] = static_cast<std::size_t>(std::count_if(
+            demand_run_scenes[window - 1].begin(), demand_run_scenes[window - 1].end(),
             [](const auto& item) { return item.second.common_safe == 0; }));
     }
 
@@ -686,18 +825,39 @@ int main(int argc, char** argv) try {
            << "  \"scenes_w4\": " << scenes[2].size() << ",\n"
            << "  \"scenes_w5\": " << scenes[3].size() << ",\n"
            << "  \"scenes_w6\": " << scenes[4].size() << ",\n"
+           << "  \"scenes_r1\": " << run_scenes[0].size() << ",\n"
+           << "  \"scenes_r2\": " << run_scenes[1].size() << ",\n"
+           << "  \"scenes_r3\": " << run_scenes[2].size() << ",\n"
+           << "  \"scenes_r4\": " << run_scenes[3].size() << ",\n"
+           << "  \"scenes_rd1\": " << demand_run_scenes[0].size() << ",\n"
+           << "  \"scenes_rd2\": " << demand_run_scenes[1].size() << ",\n"
+           << "  \"scenes_rd3\": " << demand_run_scenes[2].size() << ",\n"
+           << "  \"scenes_rd4\": " << demand_run_scenes[3].size() << ",\n"
            << "  \"conflicts_w2\": " << conflicts[0] << ",\n"
            << "  \"conflicts_w3\": " << conflicts[1] << ",\n"
            << "  \"conflicts_w4\": " << conflicts[2] << ",\n"
            << "  \"conflicts_w5\": " << conflicts[3] << ",\n"
-           << "  \"conflicts_w6\": " << conflicts[4] << "\n"
+           << "  \"conflicts_w6\": " << conflicts[4] << ",\n"
+           << "  \"conflicts_r1\": " << run_conflicts[0] << ",\n"
+           << "  \"conflicts_r2\": " << run_conflicts[1] << ",\n"
+           << "  \"conflicts_r3\": " << run_conflicts[2] << ",\n"
+           << "  \"conflicts_r4\": " << run_conflicts[3] << ",\n"
+           << "  \"conflicts_rd1\": " << demand_run_conflicts[0] << ",\n"
+           << "  \"conflicts_rd2\": " << demand_run_conflicts[1] << ",\n"
+           << "  \"conflicts_rd3\": " << demand_run_conflicts[2] << ",\n"
+           << "  \"conflicts_rd4\": " << demand_run_conflicts[3] << "\n"
            << "}\n";
     std::cout << "models=" << models.size() << " macros=" << totals.macro_states
               << " unit_moves=" << totals.unit_moves
               << " exceptions=" << witnessed_exceptions << '/'
               << exception_signatures.size() << " conflicts=" << conflicts[0]
               << ',' << conflicts[1] << ',' << conflicts[2] << ','
-              << conflicts[3] << ',' << conflicts[4] << '\n';
+              << conflicts[3] << ',' << conflicts[4]
+              << " run_conflicts=" << run_conflicts[0] << ',' << run_conflicts[1]
+              << ',' << run_conflicts[2] << ',' << run_conflicts[3]
+              << " demand_run_conflicts=" << demand_run_conflicts[0] << ','
+              << demand_run_conflicts[1] << ',' << demand_run_conflicts[2] << ','
+              << demand_run_conflicts[3] << '\n';
     return 0;
 } catch (const std::exception& error) {
     std::cerr << "error: " << error.what() << '\n';
