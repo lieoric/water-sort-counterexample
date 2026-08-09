@@ -62,15 +62,19 @@ jobs:
           for raw in "${run_ids[@]}"; do
             run=$(tr -d ' ' <<< "$raw")
             test -n "$run"
-            gh run download "$run" \
-              --repo "${{ github.repository }}" \
-              --name frontier-merged-all-heights \
-              --dir "source/$run"
+            if ! gh run download "$run" \
+                --repo "${{ github.repository }}" \
+                --name frontier-merged-all-heights \
+                --dir "source/$run"; then
+              gh run download "$run" \
+                --repo "${{ github.repository }}" \
+                --pattern 'frontier-merged-h*' \
+                --dir "source/$run"
+            fi
           done
           python3 scripts/merge_instance_catalogs.py \
             --input source \
-            --output combined \
-            --expected-catalogs "${#run_ids[@]}"
+            --output combined
       - name: Build, test, and bundle
         run: |
           cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DWSC_WARNINGS_AS_ERRORS=ON

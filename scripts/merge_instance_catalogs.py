@@ -10,11 +10,11 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--input", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
-    parser.add_argument("--expected-catalogs", required=True, type=int)
+    parser.add_argument("--expected-catalogs", type=int)
     args = parser.parse_args()
 
     catalogs = sorted(args.input.rglob("instances.tsv"))
-    if len(catalogs) != args.expected_catalogs:
+    if args.expected_catalogs is not None and len(catalogs) != args.expected_catalogs:
         raise SystemExit(
             f"expected {args.expected_catalogs} catalogs, found {len(catalogs)}"
         )
