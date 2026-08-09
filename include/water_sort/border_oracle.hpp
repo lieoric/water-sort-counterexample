@@ -43,6 +43,34 @@ struct AnalysisResult {
     std::map<DeadlockSignature, std::uint64_t> signatures;
 };
 
+struct PolicyTable {
+    std::uint32_t initial_state = 0;
+    std::vector<std::uint8_t> solvable;
+    std::vector<std::uint8_t> reachable;
+    std::vector<std::uint64_t> legal_columns;
+    std::vector<std::uint64_t> safe_columns;
+    std::uint64_t states_evaluated = 0;
+    std::uint64_t transitions_tested = 0;
+    std::uint64_t solvable_states = 0;
+    std::uint64_t reachable_states = 0;
+    std::uint64_t reachable_solvable_states = 0;
+};
+
+struct PolicyColumnView {
+    std::vector<Color> visible_runs; // top to bottom
+    bool truncated = false;
+    std::uint32_t remaining_borders = 0;
+    std::uint32_t buffers_needed = 0;
+};
+
+struct PolicyStateView {
+    std::vector<std::uint32_t> ranks;
+    std::vector<PolicyColumnView> columns;
+    std::vector<std::uint32_t> f;
+    std::vector<std::uint32_t> g;
+    std::uint32_t available_buffers = 0;
+};
+
 class BorderOracle {
 public:
     explicit BorderOracle(Instance instance);
@@ -50,6 +78,9 @@ public:
     [[nodiscard]] OracleResult solve() const;
     [[nodiscard]] CountResult count_solutions(std::uint64_t cap) const;
     [[nodiscard]] AnalysisResult analyze() const;
+    [[nodiscard]] PolicyTable policy_table() const;
+    [[nodiscard]] PolicyStateView policy_state(std::uint32_t state,
+                                               std::uint32_t visible_boundaries) const;
     [[nodiscard]] std::uint32_t state_count() const { return state_count_; }
 
 private:

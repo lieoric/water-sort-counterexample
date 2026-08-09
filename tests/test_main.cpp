@@ -85,19 +85,40 @@ std::uint64_t exhaustive_cross_check(std::uint32_t height, std::uint32_t colors)
 void run_tests() {
     {
         const auto solved = make_instance(2, 2, 2, {{0, 0}, {1, 1}});
-        const auto border = water_sort::BorderOracle(solved).solve();
+        const water_sort::BorderOracle oracle(solved);
+        const auto border = oracle.solve();
+        const auto policy = oracle.policy_table();
         const auto water = water_sort::solve_water_exact(solved);
         require(border.solvable && border.removal_columns.empty(), "solved oracle case failed");
+        require(policy.initial_state == 0 && policy.solvable.size() == 1 &&
+                    policy.solvable[0] != 0 && policy.reachable[0] != 0,
+                "solved policy table case failed");
         require(water.status == water_sort::WaterSolveStatus::solvable && water.states_visited == 1,
                 "locked completed columns were not terminal");
+    }
+    {
+        const auto instance = make_instance(2, 2, 2, {{0, 1}, {1, 0}});
+        const water_sort::BorderOracle oracle(instance);
+        const auto policy = oracle.policy_table();
+        require(policy.initial_state != 0 && policy.solvable[policy.initial_state] != 0 &&
+                    policy.safe_columns[policy.initial_state] != 0,
+                "solvable policy table has no safe initial action");
+        const auto view = oracle.policy_state(policy.initial_state, 1);
+        require(view.columns.size() == 2 && view.columns[0].visible_runs.size() == 2 &&
+                    view.columns[1].visible_runs.size() == 2,
+                "policy view did not expose the requested top boundary");
     }
     {
         const auto no_instance = ito_h3_k2_n9();
         const water_sort::BorderOracle oracle(no_instance);
         const auto count = oracle.count_solutions(100);
         const auto result = oracle.solve();
+        const auto policy = oracle.policy_table();
         require(count.solutions == 0, "Ito Figure 10(a) unexpectedly has a border sequence");
         require(!result.solvable, "Ito Figure 10(a) unexpectedly solved");
+        require(policy.solvable[policy.initial_state] == 0 &&
+                    policy.safe_columns[policy.initial_state] == 0,
+                "NO policy state unexpectedly has a safe action");
 
         const auto certificate = std::filesystem::temp_directory_path() / "water-sort-test.wscert";
         water_sort::write_no_certificate(no_instance, oracle.state_count(),

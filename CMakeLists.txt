@@ -56,6 +56,9 @@ target_link_libraries(water-universe PRIVATE water_sort)
 add_executable(water-descend apps/descend.cpp)
 target_link_libraries(water-descend PRIVATE water_sort)
 
+add_executable(water-policy-learn apps/policy_learn.cpp)
+target_link_libraries(water-policy-learn PRIVATE water_sort)
+
 include(CTest)
 if(BUILD_TESTING)
     add_executable(water-sort-tests tests/test_main.cpp)
@@ -105,6 +108,16 @@ if(BUILD_TESTING)
             --frontier-limit 4
             --seed 1
             --out ${CMAKE_CURRENT_BINARY_DIR}/test-descend-output)
+    add_test(NAME water-policy-learn-smoke
+        COMMAND water-policy-learn
+            --height 3
+            --colors 3
+            --empty 2
+            --depth 2
+            --samples 8
+            --seed 1
+            --stop-on-no 1
+            --out ${CMAKE_CURRENT_BINARY_DIR}/test-policy-output)
     function(add_universe_regression NAME HEIGHT COLORS EMPTY CLASSES UNSOLVABLE)
         add_test(NAME ${NAME}
             COMMAND water-universe

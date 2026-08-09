@@ -123,6 +123,8 @@ under `experiments/`.
   total.
 - `water-universe`: complete low-height enumeration modulo all color-name and
   full-column permutations, followed by exact oracle classification.
+- `water-policy-learn`: exact safe-action extraction and thin-layer scene
+  conflict discovery for a candidate finite policy.
 - A literal full-state Water BFS with forced bulk moves and locked completed
   columns, used only as a small-instance reference implementation.
 - Exhaustive cross-checks over 1,796 small initial arrangements, plus the
@@ -175,6 +177,21 @@ Run the oracle:
 ```bash
 ./build/water-oracle --input examples/5x16.txt --count 10000
 ```
+
+Learn candidate thin-layer rules from exact safe actions:
+
+```bash
+./build/water-policy-learn \
+  --colors 4 --height 9 --empty 2 \
+  --depth 3 --samples 1000 --seed 1 \
+  --out out/policy-d3
+```
+
+Equal scene signatures are merged by intersecting their exact safe next-border
+choices. An empty intersection is a concrete conflict showing that the current
+observation depth or signature is insufficient. A nonempty intersection is
+only a candidate rule until it is proved for every possible hidden suffix. See
+[the thin-layer policy design](docs/thin-layer-policy-learning.md).
 
 For an unsolvable instance, write and independently check a certificate:
 
