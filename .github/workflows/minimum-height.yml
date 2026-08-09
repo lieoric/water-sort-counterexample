@@ -1,13 +1,35 @@
-name: Scan complete low-height universe
+name: Scan complete balanced universe
+run-name: Balanced c${{ inputs.colors }} h${{ inputs.height }} k${{ inputs.empty_columns }}
 
 on:
   workflow_dispatch:
     inputs:
+      colors:
+        description: Colors and initially full columns
+        required: true
+        default: "5"
+        type: string
       height:
-        description: Tube height (each of the five colors occurs this many times)
+        description: Tube height and copies of each color
         required: true
         default: "3"
         type: string
+      empty_columns:
+        description: Initially empty columns
+        required: true
+        default: "2"
+        type: string
+      shards:
+        description: Active shards (1, 2, 4, 8, or 16)
+        required: true
+        default: "16"
+        type: choice
+        options:
+          - "1"
+          - "2"
+          - "4"
+          - "8"
+          - "16"
       candidate_limit:
         description: Canonical classes per shard; 0 means unlimited
         required: true
@@ -28,14 +50,19 @@ permissions:
   contents: read
 
 concurrency:
-  group: minimum-height-${{ github.ref }}-${{ inputs.height }}
+  group: balanced-universe-${{ github.ref }}-c${{ inputs.colors }}-h${{ inputs.height }}-k${{ inputs.empty_columns }}
   cancel-in-progress: false
 
 jobs:
   prepare:
     runs-on: ubuntu-latest
+    outputs:
+      shard_matrix: ${{ steps.shard-matrix.outputs.value }}
     steps:
       - uses: actions/checkout@v5
+      - name: Build shard matrix
+        id: shard-matrix
+        run: echo "value=$(jq -cn --argjson count '${{ inputs.shards }}' '[range(0; $count)]')" >> "$GITHUB_OUTPUT"
       - name: Build and test once
         run: |
           cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DWSC_WARNINGS_AS_ERRORS=ON
@@ -52,14 +79,14 @@ jobs:
 
   scan:
     needs: prepare
-    name: Height ${{ inputs.height }}, shard ${{ matrix.shard }} of 16
+    name: c${{ inputs.colors }} h${{ inputs.height }} k${{ inputs.empty_columns }}, shard ${{ matrix.shard }} of ${{ inputs.shards }}
     runs-on: ubuntu-latest
     timeout-minutes: 60
     strategy:
       fail-fast: false
       max-parallel: 16
       matrix:
-        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
+        shard: ${{ fromJSON(needs.prepare.outputs.shard_matrix) }}
     steps:
       - uses: actions/checkout@v5
       - uses: actions/download-artifact@v6
@@ -71,10 +98,10 @@ jobs:
         run: |
           tools/water-universe \
             --height "${{ inputs.height }}" \
-            --colors 5 \
-            --empty 2 \
+            --colors "${{ inputs.colors }}" \
+            --empty "${{ inputs.empty_columns }}" \
             --shard "${{ matrix.shard }}" \
-            --shards 16 \
+            --shards "${{ inputs.shards }}" \
             --shard-columns "${{ inputs.shard_columns }}" \
             --candidate-limit "${{ inputs.candidate_limit }}" \
             --certificate-limit "${{ inputs.certificate_limit }}" \
@@ -98,7 +125,7 @@ jobs:
       - uses: actions/upload-artifact@v6
         if: always()
         with:
-          name: minimum-height-${{ inputs.height }}-shard-${{ matrix.shard }}
+          name: balanced-c${{ inputs.colors }}-h${{ inputs.height }}-k${{ inputs.empty_columns }}-shard-${{ matrix.shard }}
           path: out/shard-${{ matrix.shard }}/
           if-no-files-found: error
           retention-days: 30
@@ -109,12 +136,12 @@ jobs:
     steps:
       - uses: actions/download-artifact@v6
         with:
-          pattern: minimum-height-${{ inputs.height }}-shard-*
+          pattern: balanced-c${{ inputs.colors }}-h${{ inputs.height }}-k${{ inputs.empty_columns }}-shard-*
           path: collected
       - name: Check completeness and merge canonical classes
         run: |
           reports=$(find collected -name report.json -type f | wc -l)
-          test "$reports" -eq 16
+          test "$reports" -eq "${{ inputs.shards }}"
           stopped=$(find collected -name report.json -type f -print0 | \
             xargs -0 -n1 jq -r '.stopped_early' | grep -c '^true$' || true)
           test "$stopped" -eq 0
@@ -130,9 +157,9 @@ jobs:
           representations=$(find collected -name report.json -type f -print0 | \
             xargs -0 -n1 jq -r '.representations' | awk '{n += $1} END {print n+0}')
           {
-            echo "## Complete low-height universe"
+            echo "## Complete balanced universe"
             echo
-            echo "- Colors / full columns / empty columns: 5 / 5 / 2"
+            echo "- Colors / full columns / empty columns: ${{ inputs.colors }} / ${{ inputs.colors }} / ${{ inputs.empty_columns }}"
             echo "- Height and copies per color: ${{ inputs.height }}"
             echo "- Orderly representations examined: $representations"
             echo "- Exact symmetry classes: $total"
@@ -142,6 +169,6 @@ jobs:
           } | tee merged/summary.md >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v6
         with:
-          name: minimum-height-merged-${{ inputs.height }}
+          name: balanced-merged-c${{ inputs.colors }}-h${{ inputs.height }}-k${{ inputs.empty_columns }}
           path: merged/
           retention-days: 30

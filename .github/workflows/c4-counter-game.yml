@@ -1,0 +1,95 @@
+name: Solve bounded k2 counter game
+run-name: Counter game c${{ inputs.colors || '4' }} h${{ inputs.height || '6' }} ${{ inputs.observation || 'next-run' }}
+
+on:
+  # Bootstrap this research workflow before the draft PR reaches main.
+  push:
+    branches: [agent/minimum-height-five]
+    paths: [.github/workflows/c4-counter-game.yml]
+  workflow_dispatch:
+    inputs:
+      colors:
+        description: Colors and initially full columns
+        required: true
+        default: "4"
+        type: choice
+        options: ["3", "4"]
+      height:
+        description: Fixed stack height
+        required: true
+        default: "6"
+        type: string
+      observation:
+        description: Information visible before the controller chooses a source
+        required: true
+        default: next-run
+        type: choice
+        options: [next-run, q]
+      max_states:
+        description: Hard cap on memoized game states
+        required: true
+        default: "50000000"
+        type: string
+      max_candidates:
+        description: Hard cap on enumerated committed observations
+        required: true
+        default: "2000000000"
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: c${{ inputs.colors || '4' }}-k2-counter-game-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  solve:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    env:
+      COLORS: ${{ inputs.colors || '4' }}
+      HEIGHT: ${{ inputs.height || '6' }}
+      OBSERVATION: ${{ inputs.observation || 'next-run' }}
+      MAX_STATES: ${{ inputs.max_states || '50000000' }}
+      MAX_CANDIDATES: ${{ inputs.max_candidates || '2000000000' }}
+    steps:
+      - uses: actions/checkout@v5
+      - name: Build and test
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DWSC_WARNINGS_AS_ERRORS=ON
+          cmake --build build --parallel 2
+          ctest --test-dir build --output-on-failure
+      - name: Enumerate and solve the exact bounded game
+        run: |
+          mkdir -p out
+          set -o pipefail
+          build/water-counter-game \
+            --colors "$COLORS" \
+            --height "$HEIGHT" \
+            --observation "$OBSERVATION" \
+            --max-states "$MAX_STATES" \
+            --max-candidates "$MAX_CANDIDATES" \
+            --self-test \
+            --report out/report.json \
+            --witness out/witness.txt 2>&1 | tee out/run.log
+      - name: Add result to summary
+        if: always()
+        run: |
+          if test -f out/report.json; then
+            echo '```json' >> "$GITHUB_STEP_SUMMARY"
+            cat out/report.json >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+          fi
+          if test -f out/witness.txt; then
+            echo '```text' >> "$GITHUB_STEP_SUMMARY"
+            cat out/witness.txt >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: counter-game-c${{ inputs.colors || '4' }}-h${{ inputs.height || '6' }}-${{ inputs.observation || 'next-run' }}
+          path: out/
+          if-no-files-found: error
+          retention-days: 30

@@ -1,0 +1,9 @@
+# Near-obstruction: only columns 1 and 3 are winning first border choices.
+# Columns are written bottom-to-top.
+height=8
+colors=4
+empty=2
+column=22231112
+column=22333300
+column=20011102
+column=11333000

@@ -18,6 +18,130 @@ solvability. A completed column contains every unit of its color; pouring it
 into an empty column only exchanges the roles of the completed and empty
 columns, which are unlabeled.
 
+### Bounded multi-stack interpretation
+
+The puzzle is also a finite-state system of bounded stacks. Each column is a
+capacity-`h` stack over a color alphabet. A move pops a maximal compatible
+top run (truncated only by destination capacity) from one stack and pushes it
+onto another; a completed monochrome stack is disabled. Moves whose source and
+destination stack sets are disjoint commute. This makes the model a compact
+case study for reachability, symmetry reduction, and partial-order reduction.
+It is a finite, bounded relative of the
+[multi-stack reachability models](https://doi.org/10.1016/j.ic.2020.104588)
+used to study concurrent recursive programs; exploiting commuting operations
+is standard in
+[dynamic partial-order reduction](https://doi.org/10.1145/1040305.1040315).
+
+The current top-border oracle goes further than merely running independent
+search workers: it replaces concrete buffer-management interleavings by an
+irreversible border-removal DAG. A concurrency/formal-methods treatment would
+need to state that abstraction for a general class of bounded colored
+multi-stack systems and compare it with standard partial-order reduction; the
+fact that the implementation uses stacks or parallel GitHub jobs is not by
+itself a new concurrency result.
+
+### Balanced bottom-layer monotonicity
+
+Let `I` have height `h`, with one full column per color and exactly `h` units
+of every color. Form `I+` at height `h+1` by inserting one new bottom unit in
+every full column, using every color exactly once; the old columns remain
+unchanged above the new layer. Then
+
+```text
+I+ solvable  =>  I solvable,
+I  NO        =>  I+ NO.
+```
+
+To project a border-removal sequence of `I+`, delete the removals of the new
+bottom borders. Before any retained removal, let `r` be the number of columns
+whose old borders are all gone but whose new bottom border remains. The
+projected state of `I` has exactly `r` more monochrome bins. In the balanced
+model each color has at most one columnful of remaining material, so its
+buffer demand `M_c` is either zero or one. An old deficient color can cease to
+be deficient in `I+` only if it is hosted by one of those `r` pending columns;
+one pending column hosts only one color. Therefore
+
+```text
+buffers_needed(I) <= buffers_needed(I+) + r
+monochrome_bins(I)  = monochrome_bins(I+) + r.
+```
+
+Every retained removal that is legal in `I+` is consequently legal in `I`.
+The projected sequence removes all old borders, proving the implication. By
+induction, balanced bottom layers can be added repeatedly. This closure uses
+the condition that color multiplicity equals capacity; it is not asserted for
+arbitrary unbalanced stack systems.
+
+### Balanced parameter frontier
+
+Write `E(c,h,k)` when at least one balanced NO instance exists with `c`
+colors/full columns, height `h`, and `k` initially empty columns. Besides the
+height implication above, existence is monotone in the number of colors:
+
+```text
+E(c,h,k) => E(c+1,h,k).
+```
+
+To construct the larger instance, add a new full monochrome column in a new
+color. It is already completed and locked, so it cannot participate in a move;
+deleting it projects any solution back to the original instance. Consequently,
+for fixed `k`, the NO-existence region is upward closed in `(c,h)`, while the
+universal-YES region is downward closed. Adding empty columns has the opposite
+resource direction: an instance solvable with `k` empty columns remains
+solvable when more empty columns are supplied.
+
+For one empty column, complete scans give the three minimal NO parameter pairs
+
+```text
+(c,h) = (2,4), (3,3), (4,2).
+```
+
+The adjacent maximal safe pairs `(2,3)` and `(3,2)` have respectively 7 and 5
+exact symmetry classes, all YES. The three obstruction scans contain 1 NO
+among 23 classes, 7 NO among 55 classes, and 1 NO among 12 classes. Together
+with parameter monotonicity, this gives the complete existence classification
+
+```text
+E(c,h,1)  <=>  c >= 2 and h >= 2 and c + h >= 6.
+```
+
+The three minimal witnesses and independently checked certificates are stored
+under `experiments/`.
+
+For three colors and two empty columns, an analytic deadlock-bypass argument
+now proves every balanced instance through height 8 solvable.  Independently,
+the complete height-7 16-shard scan examined 26,717,100 orderly
+representations and classified all 11,094,455 exact symmetry classes as YES,
+with no shard stopped early.  The published general empty-column bound
+directly covers only heights at most 3 here, and no arbitrary-height theorem
+is claimed.  See [the proof](docs/three-color-two-empty.md) and
+[`31339686115`](https://github.com/lieoric/water-sort-counterexample/actions/runs/31339686115).
+
+For two empty columns, the smallest currently certified four-color obstruction
+height is 8. One especially symmetric witness is
+
+```text
+h=8
+22111003 / 22111003 / 00333221 / 00333221
+```
+
+with columns written bottom-to-top. The exact border oracle finds zero
+solutions; the independent closure certificate marks 60 states and checks 236
+transitions. A separate full physical-state BFS, using forced maximal bulk
+pours and locked completed columns rather than the border abstraction,
+exhausts 72 states and also returns NO. Two more inequivalent height-8
+witnesses are committed as independent regressions. Therefore
+
+```text
+E(4,h,2) holds for every h >= 8.
+```
+
+The audited next-run game proves every balanced four-color instance through
+height 6 solvable. Thus the minimum four-color/two-empty obstruction height is
+currently narrowed to `7 <= h_min <= 8`. Every direct balanced one-layer
+deletion of all three committed height-8 witnesses is solvable, but that local fact
+does not exclude an unrelated height-7 obstruction.
+
 ## What is implemented
 
 - `water-oracle`: an exact top-border dynamic program based on Ito et al.
@@ -33,6 +157,25 @@ columns, which are unlabeled.
   total.
 - `water-universe`: complete low-height enumeration modulo all color-name and
   full-column permutations, followed by exact oracle classification.
+- `water-policy-learn`: exact safe-action extraction and thin-layer scene
+  conflict discovery for a candidate finite policy.
+- `water-policy-control`: randomized synthesis of one shared thin-layer
+  controller over an exact catalog, checking only the states induced by that
+  controller.
+- `water-unit-scenes`: expansion of controlled border choices into one-item
+  moves, comparing finite top-item windows, top color-run windows, and
+  color-run windows augmented by bounded Ito buffer-demand counters.
+- `water-depth-witness`: independent verification of a scalable pair of tight
+  states with identical bounded observations and disjoint safe actions.
+- `water-continuous-control`: continuous realization of controlled top-border
+  paths using real forced maximal bulk moves, without rebuilding a canonical
+  physical state.
+- `water-counter-game`: exact finite-height online-game analysis of the
+  three-or-four-color/two-empty macro question, with either bare counter
+  observations or every current next color run committed before source choice.
+- `scripts/smt_counterexample.py`: joint fixed-height SMT search over both the
+  unknown balanced arrangement and its complete exact top-border winning DAG;
+  SAT candidates are checked by the independent C++ certificate verifier.
 - A literal full-state Water BFS with forced bulk moves and locked completed
   columns, used only as a small-instance reference implementation.
 - Exhaustive cross-checks over 1,796 small initial arrangements, plus the
@@ -86,6 +229,147 @@ Run the oracle:
 ./build/water-oracle --input examples/5x16.txt --count 10000
 ```
 
+Learn candidate thin-layer rules from exact safe actions:
+
+```bash
+./build/water-policy-learn \
+  --colors 4 --height 9 --empty 2 \
+  --depth 3 --samples 1000 --seed 1 \
+  --out out/policy-d3
+```
+
+Equal scene signatures are merged by intersecting their exact safe next-border
+choices. An empty intersection is a concrete conflict showing that the current
+observation depth or signature is insufficient. A nonempty intersection is
+only a candidate rule until it is proved for every possible hidden suffix. See
+[the thin-layer policy design](docs/thin-layer-policy-learning.md).
+
+For the focused four-color/two-empty proof frontier, stop when two original
+columns have no borders and mutate only the hidden tails:
+
+```bash
+./build/water-policy-learn \
+  --colors 4 --height 12 --empty 2 --depth 3 \
+  --goal-exhausted 2 --samples 40 \
+  --tail-mutations 3 --tail-swaps 3 \
+  --out out/frontier-h12
+```
+
+The `Attack c4 k2 frontier policy` workflow runs this experiment across
+several heights and performs a final cross-height signature merge.
+
+The global merge can report conflicts that a deterministic controller never
+needs to visit. Test that stronger, controlled-reachability question against
+the merged catalog with:
+
+```bash
+./build/water-policy-control \
+  --catalog out/all-heights/instances.tsv \
+  --conflicts out/all-heights/conflicts.tsv \
+  --depth 3 --goal-exhausted 2 \
+  --restarts 256 --repair-passes 128 --seed 1 \
+  --out out/controlled-policy
+```
+
+`success=true` supplies one deterministic action table that carries every
+catalog instance to the two-exhausted-column frontier. It is still a finite
+sample result; `success=false` only exhausts the randomized restart budget.
+The `Synthesize c4 k2 controlled policy` workflow repeats the search with
+independent seeds and merges their reports.
+
+A controller can instead use a simple finite default rule and store only its
+exceptions:
+
+```bash
+./build/water-policy-control \
+  --catalog out/all-heights/instances.tsv \
+  --conflicts out/all-heights/conflicts.tsv \
+  --depth 3 --goal-exhausted 2 \
+  --default-heuristic last \
+  --restarts 64 --repair-passes 128 --seed 1 \
+  --out out/compressed-policy
+```
+
+Here `last` means the last currently legal source in the canonical column
+order. On the 3,501-instance catalog, two successful attempts each need 114
+sampled exceptions instead of a rule for every observed signature; their union
+contains 119. The `Compress c4 k2 controlled policy` workflow compares several
+such defaults and measures whether their exception sets remain stable across
+independent seeds.
+
+Expand those macro choices into one-item moves and compare observation windows:
+
+```bash
+./build/water-unit-scenes \
+  --catalog out/all-heights/instances.tsv \
+  --policy out/compressed-0/policy.tsv \
+  --policy out/compressed-1/policy.tsv \
+  --goal-exhausted 2 \
+  --out out/unit-scenes
+```
+
+The unit-scene report intersects safe next moves for equal labeled-stack
+signatures at item windows 2 through 6, run windows 1 through 4, and the same
+run windows with buffer-demand fields. Each border action is physically valid
+and is expanded completely, but the next macro state is rebuilt in canonical
+tight form. Thus this diagnoses a candidate small finite program while explicitly
+counting the still-unproved connections between macro traces. See [the
+thin-layer policy design](docs/thin-layer-policy-learning.md).
+
+On the combined 4,301-instance catalog, sampled through height 46, the two
+compressed controllers produce 59, 35, 6, 2, and 0 conflicts at visible-item
+depths 2 through 6. Thus the sampled minimum is `D = 6`. A scalable committed
+witness pair additionally proves that no height-independent item depth can
+choose a safe action for every possible frontier-winning tight configuration.
+A carefully controlled strategy might still avoid the obstruction family; see
+[the fixed-depth obstruction and its exact scope](docs/no-fixed-item-depth.md).
+
+A follow-up attack replaces item depth by monochrome-run depth and carries the
+bounded Ito buffer-demand state into every unit scene. Across the same 4,301
+instances, two visible runs without counters still have 82 conflicts, while
+two visible runs plus demand counters have **zero sampled conflicts** over
+241,349 macro checkpoints and 1,271,582 unit moves. This is a finite-catalog
+candidate controller; the committed height-8 NO shows that it cannot
+extend to a universal all-height solver. See
+[`31333399467`](https://github.com/lieoric/water-sort-counterexample/actions/runs/31333399467).
+
+The remaining physical-realization gap is handled separately by
+`water-continuous-control`. It keeps the actually reached tight configuration,
+implements Ito's constructive border-removal and retightening steps with
+forced maximal pours, and refuses to source a locked full monochrome stack.
+It then removes every remaining border after the two-exhausted-column frontier
+and verifies the full sorted goal. See [the continuous realization
+argument](docs/continuous-realization.md).
+
+The exact 4,301-instance catalog was replayed from its real physical initial
+states under both compressed controllers: **8,602/8,602** runs reached the
+fully sorted goal after 284,154 border removals and 389,773 forced maximal
+bulk moves, with zero construction gaps and zero locked-source violations.
+This validates physical realization on the finite catalog; it does not imply
+an arbitrary-height macro policy. See
+[`31334595589`](https://github.com/lieoric/water-sort-counterexample/actions/runs/31334595589).
+
+Before the height-8 obstruction was found, the all-height question was also
+attacked as a bounded counter game.
+Bare `Q=(z,a_i,s_i,d_c)` observations first lose at height 5, proving that
+those counters alone cannot support one online controller. If every column's
+next maximal color run is committed and visible before source choice, the
+exact game has no losing initial observation through height 6. At height 6
+this closes 23,460,258 reachable observations; 231,105 losing local states are
+all avoidable from all 361,334 initial observations. These results prove the
+universal safe range through height 6, while the committed height-8 Water NO
+independently disproves the all-height claim.
+See [the bounded counter-game definition and results](docs/counter-game.md).
+
+A complementary [joint SMT encoding](docs/smt-search.md) searches a complete
+symmetry-reduced covering at one fixed height without first enumerating
+arrangements.
+It exactly reconstructs the known `c=2,h=4,k=1` NO witness and returns UNSAT
+on already-known low four-color safe cases. Its sharded workflow is now an
+independent fixed-height cross-check and a possible route to resolving height
+7. Finite UNSAT runs have no retained solver proof object, so they are
+reported separately from checked transition-closure certificates.
+
 For an unsolvable instance, write and independently check a certificate:
 
 ```bash
@@ -122,6 +406,17 @@ Mutations swap two differently colored cells, so every candidate always has
 exactly 16 units of each color. The heuristic minimizes the number of legal
 border-removal sequences, capped for speed. A count of zero is exact; all
 positive capped counts are only search fitness.
+
+For a focused obstruction search, `--fitness safe-initial` first minimizes the
+number of initial border choices that can still reach the goal, then uses the
+capped solution count as a tie-breaker.  Reaching zero is an exact NO, not just
+a heuristic score; the hunter still emits the ordinary independently checked
+transition-closure certificate.
+
+`--input INSTANCE` starts every search basin from a known near-obstruction;
+`--restart-interval 0` keeps walking that basin instead of periodically
+returning to a fresh random instance.  The committed height-8 seed at
+`tests/data/c4-h8-safe2.txt` has exactly two winning initial border choices.
 
 The `Hunt counterexample` GitHub Actions workflow starts eight independent
 shards and uploads each shard's best instance and report. If a shard finds a
@@ -200,18 +495,17 @@ Changing `--height` keeps the run-color order but solves new integer length
 constraints, making it possible to test whether the obstruction persists at
 other tube heights.
 
-### Complete low-height search
+### Complete balanced-universe search
 
-To study the first height at which two empty columns can fail, keep five
-colors, five initially full columns, and two empty columns fixed, and scan
-heights upward:
+To scan any balanced parameter point exactly, supply its colors, height, and
+empty-column count to the orderly enumerator:
 
 ```bash
 ./build/water-universe \
-  --height 3 \
-  --colors 5 \
+  --height 5 \
+  --colors 4 \
   --empty 2 \
-  --out out/universe-3
+  --out out/universe-c4-h5-k2
 ```
 
 Each color occurs exactly `height` times. The enumerator uses a
@@ -221,10 +515,46 @@ color renaming and full-column permutation. An unlimited run has
 `stopped_early=false` in `report.json`; this flag must be checked before a
 zero-counterexample result is treated as exhaustive.
 
-The complete scans currently establish that height 1 has one solvable class,
-height 2 has 20 solvable classes, and height 3 has 12,304 solvable classes. The
-known height-8 examples therefore give an upper bound on the global minimum,
-not yet a proof that height 8 is minimal.
+For five colors and two empty columns, the complete scans establish that
+height 1 has one solvable class, height 2 has
+20 solvable classes, height 3 has 12,304 solvable classes, and height 4 has
+21,383,163 solvable classes. There are no NO classes at any of these heights.
+Four independently certified height-5 NO instances are committed under
+`experiments/`, so the global minimum height is exactly
+
+```text
+h_min = 5.
+```
+
+Balanced bottom-layer monotonicity lifts a height-5 witness to every greater
+height. Hence the complete existence classification is
+
+```text
+NO instances exist exactly when h >= 5.
+```
+
+Color monotonicity also turns the complete `(c,h,k)=(5,4,2)` YES result into
+the safe rectangle `c<=5`, `h<=4`, `k=2`. A second complete scan at
+`(c,h,k)=(4,5,2)` examined 72,345,636 orderly representations and classified
+all 20,434,876 exact symmetry classes as YES. See
+[GitHub Actions run 31322659737](https://github.com/lieoric/water-sort-counterexample/actions/runs/31322659737).
+
+The exact next-run game extends the four-color side through height 6. Thus the
+current two-empty safe region includes
+
+```text
+(c <= 5 and h <= 4) or (c <= 4 and h <= 6).
+```
+
+Together with a certified NO witness at `(5,5,2)`, these two safe rectangles
+prove that `(5,5)` is a minimal NO-existence parameter pair for `k=2`.
+For exactly four colors, the certified height-8 witnesses and height
+monotonicity give NO instances at every `h>=8`; the first NO height is either
+7 or 8.
+
+The height-4 run examined 113,291,534 orderly representations before exact
+symmetry canonicalization. See
+[GitHub Actions run 31315095516](https://github.com/lieoric/water-sort-counterexample/actions/runs/31315095516).
 
 For the committed 20-run skeleton, exhaustive enumeration finds no NO length
 assignment at heights 5, 6, or 7, but finds exactly three NO symmetry classes
@@ -242,9 +572,10 @@ three-empty-column counterexample is
 evidence about this known family only; it is not a proof that every 5x16
 instance is solvable with three empty columns.
 
-`Scan complete low-height universe` distributes the orderly search tree over
-16 shards. Its merge job fails if any shard reaches its candidate limit, so a
-successful merged artifact is a complete classification at that height.
+`Scan complete balanced universe` accepts `colors`, `height`, `empty_columns`,
+and a selectable shard count. It distributes the orderly search tree and
+fails the merge if any shard reaches its candidate limit, so a successful
+merged artifact is a complete classification of that parameter point.
 
 ## Important caveats
 
@@ -262,3 +593,7 @@ successful merged artifact is a complete classification at that height.
   additional unseen descendants.
 - A run-skeleton scan varies lengths only. It says nothing about other
   run-color orders unless they are separately supplied as skeletons.
+- Balanced bottom-layer monotonicity is a statement about the balanced model:
+  one full column per color, color multiplicity equal to capacity, and one
+  permutation of the colors added per new layer. It does not automatically
+  cover unequal color totals or arbitrary padding blocks.

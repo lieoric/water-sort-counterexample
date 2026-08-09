@@ -1,0 +1,194 @@
+name: Attack c4 k2 observation depth
+run-name: Synthesize and attack unit depth over combined catalogs
+
+on:
+  # Bootstrap this research workflow before the draft PR reaches main.
+  push:
+    branches: [agent/minimum-height-five]
+    paths: [.github/workflows/c4-depth-attack.yml]
+  workflow_dispatch:
+    inputs:
+      catalog_runs:
+        description: Comma-separated frontier workflow run ids
+        required: true
+        default: "31328370710"
+        type: string
+      policy_attempts:
+        description: Independent compressed controllers
+        required: true
+        default: "2"
+        type: choice
+        options: ["2", "4"]
+      shards:
+        description: Parallel unit-scene shards
+        required: true
+        default: "8"
+        type: choice
+        options: ["4", "8", "16"]
+      restarts:
+        description: Controller restarts per attempt
+        required: true
+        default: "128"
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: c4-k2-depth-attack-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      policies: ${{ steps.matrix.outputs.policies }}
+      shards: ${{ steps.matrix.outputs.shards }}
+      shard_matrix: ${{ steps.matrix.outputs.shard_matrix }}
+    steps:
+      - uses: actions/checkout@v5
+      - name: Build matrices
+        id: matrix
+        env:
+          POLICIES: ${{ inputs.policy_attempts || '2' }}
+          SHARDS: ${{ inputs.shards || '8' }}
+        run: |
+          echo "policies=$(jq -cn --argjson count "$POLICIES" '[range(0; $count)]')" >> "$GITHUB_OUTPUT"
+          echo "shards=$SHARDS" >> "$GITHUB_OUTPUT"
+          echo "shard_matrix=$(jq -cn --argjson count "$SHARDS" '[range(0; $count)]')" >> "$GITHUB_OUTPUT"
+      - name: Download and union exact catalogs
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUNS: ${{ inputs.catalog_runs || '31328370710,31331372346' }}
+        run: |
+          IFS=',' read -ra run_ids <<< "$RUNS"
+          for raw in "${run_ids[@]}"; do
+            run=$(tr -d ' ' <<< "$raw")
+            test -n "$run"
+            if ! gh run download "$run" \
+                --repo "${{ github.repository }}" \
+                --name frontier-merged-all-heights \
+                --dir "source/$run"; then
+              gh run download "$run" \
+                --repo "${{ github.repository }}" \
+                --pattern 'frontier-merged-h*' \
+                --dir "source/$run"
+            fi
+          done
+          python3 scripts/merge_instance_catalogs.py \
+            --input source \
+            --output combined
+      - name: Build, test, and bundle
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DWSC_WARNINGS_AS_ERRORS=ON
+          cmake --build build --parallel 2
+          ctest --test-dir build --output-on-failure
+          mkdir bundle
+          cp build/water-policy-control build/water-unit-scenes bundle/
+          cp combined/instances.tsv combined/report.json bundle/
+          tar -czf depth-attack-inputs.tar.gz bundle
+      - uses: actions/upload-artifact@v6
+        with:
+          name: depth-attack-inputs
+          path: depth-attack-inputs.tar.gz
+          retention-days: 7
+
+  synthesize:
+    needs: prepare
+    name: controller ${{ matrix.policy }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        policy: ${{ fromJSON(needs.prepare.outputs.policies) }}
+    steps:
+      - uses: actions/download-artifact@v6
+        with:
+          name: depth-attack-inputs
+      - run: tar -xzf depth-attack-inputs.tar.gz
+      - name: Synthesize a last-rule controller plus exceptions
+        env:
+          RESTARTS: ${{ inputs.restarts || '128' }}
+        run: |
+          seed=$((${{ github.run_id }} * 16 + ${{ matrix.policy }}))
+          bundle/water-policy-control \
+            --catalog bundle/instances.tsv \
+            --depth 3 \
+            --goal-exhausted 2 \
+            --default-heuristic last \
+            --restarts "$RESTARTS" \
+            --repair-passes 128 \
+            --seed "$seed" \
+            --out "out/policy-${{ matrix.policy }}"
+          jq -e '.success == true' "out/policy-${{ matrix.policy }}/report.json"
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: depth-policy-${{ matrix.policy }}
+          path: out/policy-${{ matrix.policy }}/
+          if-no-files-found: error
+          retention-days: 30
+
+  analyze:
+    needs: [prepare, synthesize]
+    name: unit shard ${{ matrix.shard }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      max-parallel: 16
+      matrix:
+        shard: ${{ fromJSON(needs.prepare.outputs.shard_matrix) }}
+    steps:
+      - uses: actions/download-artifact@v6
+        with:
+          name: depth-attack-inputs
+      - uses: actions/download-artifact@v6
+        with:
+          pattern: depth-policy-*
+          path: policies
+      - run: tar -xzf depth-attack-inputs.tar.gz
+      - name: Attack observation windows two through six
+        run: |
+          mapfile -t policies_found < <(find policies -name policy.tsv -type f | sort)
+          test "${#policies_found[@]}" -eq "${{ inputs.policy_attempts || '2' }}"
+          args=()
+          for policy in "${policies_found[@]}"; do args+=(--policy "$policy"); done
+          bundle/water-unit-scenes \
+            --catalog bundle/instances.tsv \
+            "${args[@]}" \
+            --goal-exhausted 2 \
+            --shard "${{ matrix.shard }}" \
+            --shards "${{ needs.prepare.outputs.shards }}" \
+            --out "out/shard-${{ matrix.shard }}"
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: depth-scenes-${{ matrix.shard }}
+          path: out/shard-${{ matrix.shard }}/
+          if-no-files-found: error
+          retention-days: 30
+
+  merge:
+    needs: [prepare, analyze]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v6
+        with:
+          pattern: depth-scenes-*
+          path: collected
+      - name: Find the smallest conflict-free sampled depth
+        run: |
+          python3 scripts/merge_unit_scene_reports.py \
+            --input collected \
+            --output merged \
+            --expected-shards "${{ needs.prepare.outputs.shards }}"
+          cat merged/summary.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v6
+        with:
+          name: depth-attack-merged
+          path: merged/
+          retention-days: 30

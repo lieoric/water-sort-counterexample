@@ -1,0 +1,9 @@
+# Independent balanced four-color/two-empty counterexample.
+# Columns are written bottom-to-top.
+height=8
+colors=4
+empty=2
+column=22033321
+column=11300021
+column=11033322
+column=12300021

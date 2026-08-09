@@ -1,0 +1,169 @@
+name: Learn thin-layer policy
+run-name: Policy c${{ inputs.colors || '4' }} h${{ inputs.height || '9' }} k${{ inputs.empty_columns || '2' }} d1-${{ inputs.max_depth || '4' }}
+
+on:
+  # A one-time branch bootstrap lets this new workflow run before it is merged
+  # into the default branch. Later runs use workflow_dispatch inputs.
+  push:
+    branches: [agent/minimum-height-five]
+    paths: [.github/workflows/policy-learning.yml]
+  workflow_dispatch:
+    inputs:
+      colors:
+        description: Colors and initially full columns
+        required: true
+        default: "4"
+        type: string
+      height:
+        description: Height used to sample balanced instances
+        required: true
+        default: "9"
+        type: string
+      empty_columns:
+        description: Initially empty columns
+        required: true
+        default: "2"
+        type: string
+      max_depth:
+        description: Test visible-boundary depths from 1 through this value
+        required: true
+        default: "4"
+        type: choice
+        options: ["1", "2", "3", "4", "5"]
+      shards:
+        description: Independent sampling shards per depth
+        required: true
+        default: "4"
+        type: choice
+        options: ["1", "2", "4", "8"]
+      samples_per_shard:
+        description: Random balanced instances per shard
+        required: true
+        default: "250"
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: policy-${{ github.ref }}-c${{ inputs.colors || '4' }}-h${{ inputs.height || '9' }}-k${{ inputs.empty_columns || '2' }}
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      depths: ${{ steps.matrix.outputs.depths }}
+      shards: ${{ steps.matrix.outputs.shards }}
+    steps:
+      - uses: actions/checkout@v5
+      - name: Build matrices
+        id: matrix
+        env:
+          MAX_DEPTH: ${{ inputs.max_depth || '4' }}
+          SHARDS: ${{ inputs.shards || '4' }}
+        run: |
+          echo "depths=$(jq -cn --argjson count "$MAX_DEPTH" '[range(1; $count + 1)]')" >> "$GITHUB_OUTPUT"
+          echo "shards=$(jq -cn --argjson count "$SHARDS" '[range(0; $count)]')" >> "$GITHUB_OUTPUT"
+      - name: Build and test once
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DWSC_WARNINGS_AS_ERRORS=ON
+          cmake --build build --parallel 2
+          ctest --test-dir build --output-on-failure
+          mkdir tools
+          cp build/water-policy-learn build/water-verify tools/
+          tar -czf water-policy-tools.tar.gz tools
+      - uses: actions/upload-artifact@v6
+        with:
+          name: policy-tools
+          path: water-policy-tools.tar.gz
+          retention-days: 7
+
+  learn:
+    needs: prepare
+    name: Depth ${{ matrix.depth }}, shard ${{ matrix.shard }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      max-parallel: 16
+      matrix:
+        depth: ${{ fromJSON(needs.prepare.outputs.depths) }}
+        shard: ${{ fromJSON(needs.prepare.outputs.shards) }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v6
+        with:
+          name: policy-tools
+      - run: tar -xzf water-policy-tools.tar.gz
+      - name: Learn candidate safe actions
+        env:
+          COLORS: ${{ inputs.colors || '4' }}
+          HEIGHT: ${{ inputs.height || '9' }}
+          EMPTY_COLUMNS: ${{ inputs.empty_columns || '2' }}
+          SHARDS: ${{ inputs.shards || '4' }}
+          SAMPLES_PER_SHARD: ${{ inputs.samples_per_shard || '100' }}
+        run: |
+          tools/water-policy-learn \
+            --seed "${{ github.run_id }}" \
+            --shard "${{ matrix.shard }}" \
+            --shards "$SHARDS" \
+            --height "$HEIGHT" \
+            --colors "$COLORS" \
+            --empty "$EMPTY_COLUMNS" \
+            --depth "${{ matrix.depth }}" \
+            --samples "$SAMPLES_PER_SHARD" \
+            --stop-on-no 0 \
+            --out "out/d${{ matrix.depth }}-s${{ matrix.shard }}"
+      - name: Verify any discovered counterexample
+        if: ${{ hashFiles(format('out/d{0}-s{1}/counterexample.txt', matrix.depth, matrix.shard)) != '' }}
+        run: |
+          tools/water-verify \
+            --input "out/d${{ matrix.depth }}-s${{ matrix.shard }}/counterexample.txt" \
+            --certificate "out/d${{ matrix.depth }}-s${{ matrix.shard }}/counterexample.wscert"
+      - name: Add shard report to summary
+        if: always()
+        run: |
+          report="out/d${{ matrix.depth }}-s${{ matrix.shard }}/report.json"
+          if test -f "$report"; then
+            echo '```json' >> "$GITHUB_STEP_SUMMARY"
+            cat "$report" >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: policy-d${{ matrix.depth }}-s${{ matrix.shard }}
+          path: out/d${{ matrix.depth }}-s${{ matrix.shard }}/
+          if-no-files-found: error
+          retention-days: 30
+
+  merge:
+    needs: [prepare, learn]
+    name: Merge depth ${{ matrix.depth }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        depth: ${{ fromJSON(needs.prepare.outputs.depths) }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v6
+        with:
+          pattern: policy-d${{ matrix.depth }}-s*
+          path: collected
+      - name: Merge policy signatures
+        env:
+          SHARDS: ${{ inputs.shards || '4' }}
+        run: |
+          python3 scripts/merge_policy_reports.py \
+            --input collected \
+            --output "merged/depth-${{ matrix.depth }}" \
+            --depth "${{ matrix.depth }}" \
+            --expected-shards "$SHARDS"
+          cat "merged/depth-${{ matrix.depth }}/summary.md" >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v6
+        with:
+          name: policy-merged-depth-${{ matrix.depth }}
+          path: merged/depth-${{ matrix.depth }}/
+          retention-days: 30

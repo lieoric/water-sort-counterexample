@@ -1,0 +1,147 @@
+name: Replay c4 k2 continuous bulk construction
+run-name: Realize every controlled border path with physical bulk moves
+
+on:
+  # Bootstrap this research workflow before the draft PR reaches main.
+  push:
+    branches: [agent/minimum-height-five]
+    paths: [.github/workflows/c4-continuous.yml]
+  workflow_dispatch:
+    inputs:
+      source_run:
+        description: Depth-attack run containing the combined catalog and policies
+        required: true
+        default: "31333399467"
+        type: string
+      shards:
+        description: Parallel replay shards
+        required: true
+        default: "8"
+        type: choice
+        options: ["4", "8", "16"]
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: c4-k2-continuous-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+      shards: ${{ steps.matrix.outputs.shards }}
+    steps:
+      - uses: actions/checkout@v5
+      - name: Build replay matrix
+        id: matrix
+        env:
+          SHARDS: ${{ inputs.shards || '8' }}
+        run: |
+          echo "matrix=$(jq -cn --argjson count "$SHARDS" '[range(0; $count)]')" >> "$GITHUB_OUTPUT"
+          echo "shards=$SHARDS" >> "$GITHUB_OUTPUT"
+      - name: Download combined exact catalog
+        uses: actions/download-artifact@v6
+        with:
+          name: depth-attack-inputs
+          path: source/inputs
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.source_run || '31333399467' }}
+      - name: Download both compressed policies
+        uses: actions/download-artifact@v6
+        with:
+          pattern: depth-policy-*
+          path: source/policies
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.source_run || '31333399467' }}
+      - name: Build, test, and bundle exact inputs
+        run: |
+          tar -xzf source/inputs/depth-attack-inputs.tar.gz -C source/inputs
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DWSC_WARNINGS_AS_ERRORS=ON
+          cmake --build build --parallel 2
+          ctest --test-dir build --output-on-failure
+          test -s source/inputs/bundle/instances.tsv
+          mapfile -t policies < <(find source/policies -name policy.tsv -type f | sort)
+          test "${#policies[@]}" -eq 2
+          mkdir -p bundle/policies
+          cp build/water-continuous-control bundle/
+          cp source/inputs/bundle/instances.tsv bundle/
+          cp "${policies[0]}" bundle/policies/p0.tsv
+          cp "${policies[1]}" bundle/policies/p1.tsv
+          tar -czf continuous-inputs.tar.gz bundle
+      - uses: actions/upload-artifact@v6
+        with:
+          name: continuous-inputs
+          path: continuous-inputs.tar.gz
+          retention-days: 7
+
+  replay:
+    needs: prepare
+    name: shard ${{ matrix.shard }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      max-parallel: 16
+      matrix:
+        shard: ${{ fromJSON(needs.prepare.outputs.matrix) }}
+    steps:
+      - uses: actions/download-artifact@v6
+        with:
+          name: continuous-inputs
+      - run: tar -xzf continuous-inputs.tar.gz
+      - name: Execute real forced bulk moves without rebuilding state
+        run: |
+          set +e
+          bundle/water-continuous-control \
+            --catalog bundle/instances.tsv \
+            --policy bundle/policies/p0.tsv \
+            --policy bundle/policies/p1.tsv \
+            --goal-exhausted 2 \
+            --shard "${{ matrix.shard }}" \
+            --shards "${{ needs.prepare.outputs.shards }}" \
+            --out "out/shard-${{ matrix.shard }}"
+          status=$?
+          set -e
+          test "$status" -eq 0 -o "$status" -eq 2
+          test -s "out/shard-${{ matrix.shard }}/report.json"
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: continuous-shard-${{ matrix.shard }}
+          path: out/shard-${{ matrix.shard }}/
+          if-no-files-found: error
+          retention-days: 30
+
+  merge:
+    needs: [prepare, replay]
+    if: always() && needs.prepare.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v6
+        with:
+          pattern: continuous-shard-*
+          path: collected
+      - name: Merge every physical replay result
+        run: |
+          python3 scripts/merge_continuous_reports.py \
+            --input collected \
+            --output merged \
+            --expected-shards "${{ needs.prepare.outputs.shards }}"
+          cat merged/summary.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: continuous-merged
+          path: merged/
+          if-no-files-found: error
+          retention-days: 90
+      - name: Require zero construction gaps
+        run: |
+          jq -e '.gaps == 0 and .locked_source_violations == 0' merged/report.json

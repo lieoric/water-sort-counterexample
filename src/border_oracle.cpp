@@ -249,6 +249,142 @@ CountResult BorderOracle::count_solutions(std::uint64_t cap) const {
     return result;
 }
 
+PolicyTable BorderOracle::policy_table() const {
+    return policy_table_impl(static_cast<std::uint32_t>(instance_.columns.size()));
+}
+
+PolicyTable BorderOracle::policy_table_to_exhausted_columns(
+    std::uint32_t target_exhausted_columns) const {
+    if (target_exhausted_columns == 0 ||
+        target_exhausted_columns > instance_.columns.size()) {
+        throw std::runtime_error("exhausted-column target is out of range");
+    }
+    return policy_table_impl(target_exhausted_columns);
+}
+
+PolicyTable BorderOracle::policy_table_impl(
+    std::uint32_t target_exhausted_columns) const {
+    if (instance_.columns.size() > 64) {
+        throw std::runtime_error("policy masks support at most 64 full columns");
+    }
+
+    PolicyTable result;
+    result.initial_state = initial_state_;
+    result.target_exhausted_columns = target_exhausted_columns;
+    result.solvable.assign(state_count_, 0);
+    result.reachable.assign(state_count_, 0);
+    result.goal.assign(state_count_, 0);
+    result.legal_columns.assign(state_count_, 0);
+    result.safe_columns.assign(state_count_, 0);
+
+    std::vector<std::uint32_t> ranks(instance_.columns.size());
+    std::vector<std::uint32_t> f(instance_.color_count);
+    std::vector<std::uint32_t> g(instance_.color_count);
+    for (std::uint32_t state = 0; state < state_count_; ++state) {
+        ++result.states_evaluated;
+        decode(state, ranks);
+        const auto exhausted = static_cast<std::uint32_t>(
+            std::count(ranks.begin(), ranks.end(), 0U));
+        if (exhausted >= target_exhausted_columns) {
+            result.goal[state] = 1;
+            result.solvable[state] = 1;
+            continue;
+        }
+
+        std::uint32_t monochrome_bins = 0;
+        totals(ranks, f, g, monochrome_bins);
+        std::uint64_t legal = 0;
+        std::uint64_t safe = 0;
+        for (std::size_t column = 0; column < ranks.size(); ++column) {
+            if (ranks[column] == 0) continue;
+            ++result.transitions_tested;
+            if (!can_remove(ranks, column, f, g, monochrome_bins)) continue;
+            const auto bit = std::uint64_t{1} << column;
+            legal |= bit;
+            const auto next = state - multiplier_[column];
+            if (result.solvable[next] != 0) safe |= bit;
+        }
+        result.legal_columns[state] = legal;
+        result.safe_columns[state] = safe;
+        result.solvable[state] = safe != 0 ? 1 : 0;
+    }
+
+    std::vector<std::uint32_t> queue;
+    queue.reserve(std::min<std::uint32_t>(state_count_, 1U << 20U));
+    result.reachable[initial_state_] = 1;
+    queue.push_back(initial_state_);
+    for (std::size_t head = 0; head < queue.size(); ++head) {
+        const auto state = queue[head];
+        if (result.goal[state] != 0) continue;
+        auto legal = result.legal_columns[state];
+        while (legal != 0) {
+            std::size_t column = 0;
+            while ((legal & (std::uint64_t{1} << column)) == 0) ++column;
+            legal &= legal - 1;
+            const auto next = state - multiplier_[column];
+            if (result.reachable[next] == 0) {
+                result.reachable[next] = 1;
+                queue.push_back(next);
+            }
+        }
+    }
+
+    for (std::uint32_t state = 0; state < state_count_; ++state) {
+        if (result.solvable[state] != 0) ++result.solvable_states;
+        if (result.reachable[state] != 0) ++result.reachable_states;
+        if (result.solvable[state] != 0 && result.reachable[state] != 0) {
+            ++result.reachable_solvable_states;
+        }
+    }
+    return result;
+}
+
+PolicyStateView BorderOracle::policy_state(std::uint32_t state,
+                                           std::uint32_t visible_boundaries) const {
+    if (state >= state_count_) throw std::runtime_error("policy state is out of range");
+
+    PolicyStateView result;
+    result.ranks.resize(instance_.columns.size());
+    result.f.resize(instance_.color_count);
+    result.g.resize(instance_.color_count);
+    decode(state, result.ranks);
+    totals(result.ranks, result.f, result.g, result.available_buffers);
+    result.columns.resize(instance_.columns.size());
+
+    for (std::size_t column = 0; column < instance_.columns.size(); ++column) {
+        auto& output = result.columns[column];
+        auto cursor = result.ranks[column];
+        output.remaining_borders = cursor;
+        output.buffers_needed = buffers_needed(result.ranks, column, result.f, result.g);
+        if (cursor == 0) {
+            output.visible_runs.push_back(instance_.columns[column][0]);
+            continue;
+        }
+
+        output.visible_runs.push_back(
+            instance_.columns[column][data_[column].borders[cursor]]);
+        std::uint32_t exposed = 0;
+        while (cursor > 0 && exposed < visible_boundaries) {
+            output.visible_runs.push_back(
+                instance_.columns[column][data_[column].borders[cursor] - 1U]);
+            --cursor;
+            ++exposed;
+        }
+        output.truncated = cursor > 0;
+    }
+    return result;
+}
+
+std::uint32_t BorderOracle::policy_successor(std::uint32_t state,
+                                              std::size_t column) const {
+    if (state >= state_count_ || column >= instance_.columns.size()) {
+        throw std::runtime_error("policy successor is out of range");
+    }
+    const auto rank = (state / multiplier_[column]) % radix_[column];
+    if (rank == 0) throw std::runtime_error("exhausted policy column has no successor");
+    return state - multiplier_[column];
+}
+
 AnalysisResult BorderOracle::analyze() const {
     AnalysisResult result;
     std::vector<std::uint8_t> seen((state_count_ + 7U) / 8U, 0);
