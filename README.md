@@ -139,6 +139,9 @@ under `experiments/`.
 - `water-counter-game`: exact finite-height online-game analysis of the
   remaining four-color/two-empty macro question, with either bare counter
   observations or every current next color run committed before source choice.
+- `scripts/smt_counterexample.py`: joint fixed-height SMT search over both the
+  unknown balanced arrangement and its complete exact top-border winning DAG;
+  SAT candidates are checked by the independent C++ certificate verifier.
 - A literal full-state Water BFS with forced bulk moves and locked completed
   columns, used only as a small-instance reference implementation.
 - Exhaustive cross-checks over 1,796 small initial arrangements, plus the
@@ -316,10 +319,18 @@ Bare `Q=(z,a_i,s_i,d_c)` observations first lose at height 5, proving that
 those counters alone cannot support one online controller. If every column's
 next maximal color run is committed and visible before source choice, the
 exact game has no losing initial observation through height 5. At height 5
-this closes 2,404,083 reachable observations; 15,121 losing local states are
+this closes 2,545,120 reachable observations; 16,026 losing local states are
 all avoidable from every initial observation. These are finite-height policy
 results, not a Water NO certificate or an induction over arbitrary heights.
 See [the bounded counter-game definition and results](docs/counter-game.md).
+
+A complementary [joint SMT encoding](docs/smt-search.md) searches a complete
+symmetry-reduced covering at one fixed height without first enumerating
+arrangements.
+It exactly reconstructs the known `c=2,h=4,k=1` NO witness and returns UNSAT
+on the already-known low four-color safe cases. Its sharded GitHub workflow is
+intended to attack height 6 next; finite UNSAT runs have no retained solver
+proof object and do not establish the arbitrary-height theorem.
 
 For an unsolvable instance, write and independently check a certificate:
 

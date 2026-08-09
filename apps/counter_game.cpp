@@ -738,7 +738,7 @@ std::vector<VisibleOutcome> visible_outcomes(const VisibleState& state,
         if (!visible_consistent(base, height)) {
             throw std::logic_error("committed exhausting run became infeasible");
         }
-        return {{true, 0, 0, base}};
+        return {{base.exhausted >= kTargetExhausted, 0, 0, base}};
     }
 
     base.deficit[action.source.top] += action.source.exposed;
@@ -1389,6 +1389,38 @@ void self_test(std::uint32_t height) {
                 throw std::logic_error("self-test found non-descending outcome");
             }
         }
+    }
+
+    VisibleState visible;
+    for (std::uint8_t color = 0; color < kColors; ++color) {
+        visible.sources[visible.count++] = {
+            color, 1, static_cast<std::uint8_t>((color + 1U) % kColors),
+            static_cast<std::uint16_t>(height - 1U)};
+    }
+    visible = canonicalize_visible(visible);
+    if (!visible_consistent(visible, height)) {
+        throw std::logic_error("self-test visible initial state is inconsistent");
+    }
+    const auto first_actions = visible_actions(visible);
+    if (first_actions.empty()) {
+        throw std::logic_error("self-test visible initial state has no action");
+    }
+    const auto first_outcomes = visible_outcomes(visible, first_actions.front(),
+                                                 height);
+    if (first_outcomes.size() != 1 || first_outcomes.front().goal ||
+        first_outcomes.front().successor.exhausted != 1) {
+        throw std::logic_error(
+            "first exhausted source was incorrectly treated as the z=2 goal");
+    }
+    const auto second_actions = visible_actions(first_outcomes.front().successor);
+    if (second_actions.empty()) {
+        throw std::logic_error("self-test z=1 visible state has no action");
+    }
+    const auto second_outcomes = visible_outcomes(
+        first_outcomes.front().successor, second_actions.front(), height);
+    if (second_outcomes.size() != 1 || !second_outcomes.front().goal ||
+        second_outcomes.front().successor.exhausted != kTargetExhausted) {
+        throw std::logic_error("second exhausted source did not reach z=2");
     }
 }
 

@@ -191,16 +191,16 @@ that no initial observation can reach.
 
 | `h` | initial next-run observations | reachable observations | losing reachable | losing initial |
 |---:|---:|---:|---:|---:|
-| 2 | 9 | 9 | 0 | 0 |
-| 3 | 458 | 2,515 | 2 | 0 |
-| 4 | 8,367 | 137,312 | 399 | 0 |
-| 5 | 68,396 | 2,404,083 | 15,121 | 0 |
+| 2 | 9 | 15 | 0 | 0 |
+| 3 | 458 | 3,188 | 7 | 0 |
+| 4 | 8,367 | 152,079 | 474 | 0 |
+| 5 | 68,396 | 2,545,120 | 16,026 | 0 |
 
 The losing reachable observations are real local obstructions, but the
 retrograde strategy avoids them from every enumerated initial observation.
 In particular, committing all four next runs removes the `h=5` obstruction of
-the `q`-only mode.  A complete optimized `h=5` run takes about 54 seconds and
-247 MB in the current WSL/GCC build; `h=4` takes about two seconds and 35 MB.
+the `q`-only mode.  A complete optimized `h=5` run takes about 75 seconds and
+258 MB in the current WSL/GCC build; `h=4` takes about three seconds and 36 MB.
 
 These are complete finite-height results only.  They neither prove that the
 same controller wins at `h=6` and beyond nor establish an induction that

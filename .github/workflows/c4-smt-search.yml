@@ -1,0 +1,141 @@
+name: Search fixed c4 k2 height with SMT
+run-name: SMT c4 h${{ inputs.height || '6' }} k2 in ${{ inputs.shards || '16' }} shards
+
+on:
+  # Bootstrap this research workflow before the draft PR reaches main.
+  push:
+    branches: [agent/minimum-height-five]
+    paths: [.github/workflows/c4-smt-search.yml]
+  workflow_dispatch:
+    inputs:
+      height:
+        description: Fixed stack height
+        required: true
+        default: "6"
+        type: string
+      shards:
+        description: Complete congruence partition
+        required: true
+        default: "16"
+        type: choice
+        options: [4, 8, 16, 32]
+      timeout_ms:
+        description: Z3 timeout per shard in milliseconds
+        required: true
+        default: "1200000"
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: c4-k2-smt-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+      shards: ${{ steps.matrix.outputs.shards }}
+    env:
+      SHARDS: ${{ inputs.shards || '16' }}
+    steps:
+      - uses: actions/checkout@v5
+      - name: Build matrix
+        id: matrix
+        run: |
+          matrix=$(jq -cn --argjson count "$SHARDS" '[range(0; $count)]')
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+          echo "shards=$SHARDS" >> "$GITHUB_OUTPUT"
+      - name: Build and test independent checkers
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DWSC_WARNINGS_AS_ERRORS=ON
+          cmake --build build --target water-oracle water-verify --parallel 2
+          mkdir tools
+          cp build/water-oracle build/water-verify tools/
+          tar -czf smt-checkers.tar.gz tools
+      - uses: actions/upload-artifact@v6
+        with:
+          name: smt-checkers
+          path: smt-checkers.tar.gz
+          retention-days: 7
+
+  search:
+    needs: prepare
+    name: Shard ${{ matrix.shard }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      max-parallel: 16
+      matrix:
+        shard: ${{ fromJSON(needs.prepare.outputs.matrix) }}
+    env:
+      HEIGHT: ${{ inputs.height || '6' }}
+      SHARDS: ${{ needs.prepare.outputs.shards }}
+      TIMEOUT_MS: ${{ inputs.timeout_ms || '1200000' }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install finite-domain solver
+        run: python -m pip install --disable-pip-version-check z3-solver==4.13.4.0
+      - uses: actions/download-artifact@v6
+        with:
+          name: smt-checkers
+      - run: tar -xzf smt-checkers.tar.gz
+      - name: Search one exact symmetry-reduced shard
+        run: |
+          mkdir -p out
+          set -o pipefail
+          python scripts/smt_counterexample.py \
+            --height "$HEIGHT" --colors 4 --empty 2 \
+            --shard "${{ matrix.shard }}" --shards "$SHARDS" \
+            --timeout-ms "$TIMEOUT_MS" \
+            --result out/result.json \
+            --candidate out/candidate.txt 2>&1 | tee out/solver.log
+      - name: Independently verify any SAT candidate
+        run: |
+          if test -f out/candidate.txt; then
+            tools/water-oracle \
+              --input out/candidate.txt \
+              --certificate out/candidate.wscert | tee out/oracle.log
+            test -f out/candidate.wscert
+            tools/water-verify \
+              --input out/candidate.txt \
+              --certificate out/candidate.wscert | tee out/verifier.log
+          fi
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: smt-shard-${{ matrix.shard }}
+          path: out/
+          if-no-files-found: error
+          retention-days: 30
+
+  merge:
+    needs: [prepare, search]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v6
+        with:
+          pattern: smt-shard-*
+          path: shards
+      - name: Merge the complete partition
+        run: |
+          python scripts/merge_smt_search.py \
+            --input shards \
+            --shards "${{ needs.prepare.outputs.shards }}" \
+            --out merged
+          cat merged/summary.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: smt-merged
+          path: merged/
+          if-no-files-found: error
+          retention-days: 30
