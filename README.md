@@ -108,6 +108,29 @@ E(c,h,1)  <=>  c >= 2 and h >= 2 and c + h >= 6.
 The three minimal witnesses and independently checked certificates are stored
 under `experiments/`.
 
+For two empty columns, a newly certified four-color obstruction is
+
+```text
+h=9
+222311112 / 223333002 / 200111002 / 113333000
+```
+
+with columns written bottom-to-top. The exact border oracle finds zero
+solutions; the independent closure certificate marks 41 states and checks 163
+transitions. A separate full physical-state BFS, using forced maximal bulk
+pours and locked completed columns rather than the border abstraction,
+exhausts 184 states and also returns NO. Therefore
+
+```text
+E(4,h,2) holds for every h >= 9.
+```
+
+The audited next-run game proves every balanced four-color instance through
+height 6 solvable. Thus the minimum four-color/two-empty obstruction height is
+currently narrowed to `7 <= h_min <= 9`; the committed height-9 witness is
+also minimal under every single balanced one-layer deletion, but that local
+fact does not exclude unrelated height-7 or height-8 obstructions.
+
 ## What is implemented
 
 - `water-oracle`: an exact top-border dynamic program based on Ito et al.
@@ -137,7 +160,7 @@ under `experiments/`.
   paths using real forced maximal bulk moves, without rebuilding a canonical
   physical state.
 - `water-counter-game`: exact finite-height online-game analysis of the
-  remaining four-color/two-empty macro question, with either bare counter
+  four-color/two-empty macro question, with either bare counter
   observations or every current next color run committed before source choice.
 - `scripts/smt_counterexample.py`: joint fixed-height SMT search over both the
   unknown balanced arrangement and its complete exact top-border winning DAG;
@@ -295,7 +318,8 @@ bounded Ito buffer-demand state into every unit scene. Across the same 4,301
 instances, two visible runs without counters still have 82 conflicts, while
 two visible runs plus demand counters have **zero sampled conflicts** over
 241,349 macro checkpoints and 1,271,582 unit moves. This is a finite-catalog
-candidate controller, not yet a symbolic all-height closure proof. See
+candidate controller; the committed height-9 NO shows that it cannot
+extend to a universal all-height solver. See
 [`31333399467`](https://github.com/lieoric/water-sort-counterexample/actions/runs/31333399467).
 
 The remaining physical-realization gap is handled separately by
@@ -310,28 +334,30 @@ The exact 4,301-instance catalog was replayed from its real physical initial
 states under both compressed controllers: **8,602/8,602** runs reached the
 fully sorted goal after 284,154 border removals and 389,773 forced maximal
 bulk moves, with zero construction gaps and zero locked-source violations.
-This validates physical realization on the finite catalog; it is not the
-still-missing arbitrary-height macro-policy proof. See
+This validates physical realization on the finite catalog; it does not imply
+an arbitrary-height macro policy. See
 [`31334595589`](https://github.com/lieoric/water-sort-counterexample/actions/runs/31334595589).
 
-The remaining all-height question is also attacked as a bounded counter game.
+Before the height-9 obstruction was found, the all-height question was also
+attacked as a bounded counter game.
 Bare `Q=(z,a_i,s_i,d_c)` observations first lose at height 5, proving that
 those counters alone cannot support one online controller. If every column's
 next maximal color run is committed and visible before source choice, the
 exact game has no losing initial observation through height 6. At height 6
 this closes 23,460,258 reachable observations; 231,105 losing local states are
-all avoidable from all 361,334 initial observations. These are finite-height
-policy results, not a Water NO certificate or an induction over arbitrary
-heights.
+all avoidable from all 361,334 initial observations. These results prove the
+universal safe range through height 6, while the committed height-9 Water NO
+independently disproves the all-height claim.
 See [the bounded counter-game definition and results](docs/counter-game.md).
 
 A complementary [joint SMT encoding](docs/smt-search.md) searches a complete
 symmetry-reduced covering at one fixed height without first enumerating
 arrangements.
 It exactly reconstructs the known `c=2,h=4,k=1` NO witness and returns UNSAT
-on the already-known low four-color safe cases. Its sharded GitHub workflow is
-intended to attack height 6 next; finite UNSAT runs have no retained solver
-proof object and do not establish the arbitrary-height theorem.
+on already-known low four-color safe cases. Its sharded workflow is now an
+independent fixed-height cross-check and a possible route to resolving heights
+7 and 8. Finite UNSAT runs have no retained solver proof object, so they are
+reported separately from checked transition-closure certificates.
 
 For an unsolvable instance, write and independently check a certificate:
 
@@ -369,6 +395,17 @@ Mutations swap two differently colored cells, so every candidate always has
 exactly 16 units of each color. The heuristic minimizes the number of legal
 border-removal sequences, capped for speed. A count of zero is exact; all
 positive capped counts are only search fitness.
+
+For a focused obstruction search, `--fitness safe-initial` first minimizes the
+number of initial border choices that can still reach the goal, then uses the
+capped solution count as a tie-breaker.  Reaching zero is an exact NO, not just
+a heuristic score; the hunter still emits the ordinary independently checked
+transition-closure certificate.
+
+`--input INSTANCE` starts every search basin from a known near-obstruction;
+`--restart-interval 0` keeps walking that basin instead of periodically
+returning to a fresh random instance.  The committed height-8 seed at
+`tests/data/c4-h8-safe2.txt` has exactly two winning initial border choices.
 
 The `Hunt counterexample` GitHub Actions workflow starts eight independent
 shards and uploads each shard's best instance and report. If a shard finds a
@@ -491,14 +528,18 @@ the safe rectangle `c<=5`, `h<=4`, `k=2`. A second complete scan at
 all 20,434,876 exact symmetry classes as YES. See
 [GitHub Actions run 31322659737](https://github.com/lieoric/water-sort-counterexample/actions/runs/31322659737).
 
-Thus the current two-empty safe region includes
+The exact next-run game extends the four-color side through height 6. Thus the
+current two-empty safe region includes
 
 ```text
-(c <= 5 and h <= 4) or (c <= 4 and h <= 5).
+(c <= 5 and h <= 4) or (c <= 4 and h <= 6).
 ```
 
 Together with a certified NO witness at `(5,5,2)`, these two safe rectangles
 prove that `(5,5)` is a minimal NO-existence parameter pair for `k=2`.
+For exactly four colors, the certified height-9 witness and height monotonicity
+give NO instances at every `h>=9`; the first NO height remains one of 7, 8,
+or 9.
 
 The height-4 run examined 113,291,534 orderly representations before exact
 symmetry canonicalization. See

@@ -73,3 +73,23 @@ classes as YES. Combined with the complete `(5,4,2)` YES scan and the height-5
 witnesses here, this proves that `(c,h)=(5,5)` is a minimal two-empty-column
 NO-existence parameter pair. The `(4,5,2)` result is from
 [GitHub Actions run 31322659737](https://github.com/lieoric/water-sort-counterexample/actions/runs/31322659737).
+
+## Four colors, two empty columns
+
+`c4-k2-h9-no-000` is a balanced height-9 NO instance:
+
+```text
+222311112 / 223333002 / 200111002 / 113333000
+```
+
+The checked top-border closure contains 41 marked states and 163 examined
+transitions. An independent exact physical-state BFS, using forced maximal
+bulk pours and locked completed monochrome columns, exhausts 184 states and
+also returns NO. The bounded next-run game proves every instance through
+height 6 solvable, so the global minimum height is currently in `{7,8,9}`.
+
+For this witness's fixed 16-run/12-border color skeleton, exhaustive positive
+run-length enumeration is sharper: all 1,725 canonical height-8 assignments
+are YES, while 4 of 8,264 height-9 assignments are NO. All nine canonical
+balanced one-layer deletions of the committed witness are YES. These are exact
+local-family results, not a proof that every height-8 arrangement is solvable.

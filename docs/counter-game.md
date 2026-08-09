@@ -1,7 +1,7 @@
 # Bounded counter game for four colors and two empty columns
 
-`apps/counter_game.cpp` is a finite-height research tool for the remaining
-macro-level question.  It supports two observation games:
+`apps/counter_game.cpp` is a finite-height research tool for the
+four-color/two-empty macro-level question.  It supports two observation games:
 
 - `q`: the controller observes only a counter state `Q`, chooses a source, and
   only then is told the next hidden color run in that source;
@@ -202,19 +202,20 @@ retrograde strategy avoids them from every enumerated initial observation.
 In particular, committing all four next runs removes the `h=5` obstruction of
 the `q`-only mode.  A complete optimized `h=5` run takes about 75 seconds and
 258 MB in the current WSL/GCC build; `h=4` takes about three seconds and 36 MB.
-The complete `h=6` GitHub Actions run took about six minutes including build
-and tests.
+The complete [`h=6` GitHub Actions run](https://github.com/lieoric/water-sort-counterexample/actions/runs/31336494403)
+took about six minutes including build and tests.
 
 These are complete finite-height results only.  They neither prove that the
-same controller wins at `h=6` and beyond nor establish an induction that
-collapses arbitrary run lengths to the tested state space.
+same controller wins at `h=7` and beyond nor establish an induction that
+collapses arbitrary run lengths to the tested state space. A separately
+certified Water instance is already NO at `h=9`.
 
 ## What this settles, and what it does not
 
 For each reported `q` height, the game enumeration and retrograde result are
 complete under the stated algebraic projection.  In particular, `h<=4` admits
 a universal online `Q` policy and `h=5` does not.  For `next-run`, the reachable
-closure from every initial observation is complete through `h=5`.
+closure from every initial observation is complete through `h=6`.
 
 This rules out using bare `Q=(z,a_i,s_i,d_c)` as the state of an
 arbitrary-height online proof.  It does not rule out:
@@ -222,10 +223,10 @@ arbitrary-height online proof.  It does not rule out:
 - a strategy that inspects the known hidden suffixes of the input instance;
 - a stronger finite abstraction that remembers additional run information;
 - a global existence proof whose source choices depend on the whole instance;
-- universal solvability of balanced four-color, two-empty Water Sort itself.
+- the behavior at the two unresolved fixed heights `h=7` and `h=8`.
 
-Likewise, the `next-run` successes through `h=5` are evidence for a stronger
-controller, not an infinite-height proof.  A losing online game would still
+Likewise, the `next-run` successes through `h=6` prove those finite heights,
+not an infinite-height theorem.  A losing online game would still
 not automatically be a Water Sort NO: the environment is allowed to choose a
 new deeper run after each action, whereas an ordinary solver receives one
 fully fixed instance and may inspect all of its suffixes before moving.

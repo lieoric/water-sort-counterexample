@@ -212,6 +212,26 @@ void run_tests() {
 
     {
         const auto experiments = std::filesystem::path(WSC_SOURCE_DIR) / "experiments";
+        const auto instance = water_sort::read_instance(
+            experiments / "c4-k2-h9-no-000.txt");
+        const water_sort::BorderOracle oracle(instance);
+        const auto border = oracle.solve();
+        const auto frontier = oracle.policy_table_to_exhausted_columns(2);
+        require(!border.solvable && oracle.count_solutions(100).solutions == 0 &&
+                    frontier.solvable[frontier.initial_state] == 0 &&
+                    frontier.safe_columns[frontier.initial_state] == 0,
+                "four-color height-9 obstruction unexpectedly solved");
+        require(water_sort::verify_no_certificate(
+                    instance, experiments / "c4-k2-h9-no-000.wscert").valid,
+                "four-color height-9 obstruction certificate failed verification");
+        const auto water = water_sort::solve_water_exact(instance, 1'000'000);
+        require(water.status == water_sort::WaterSolveStatus::unsolvable &&
+                    water.states_visited == 184,
+                "full locked bulk-Water BFS did not confirm the height-9 NO");
+    }
+
+    {
+        const auto experiments = std::filesystem::path(WSC_SOURCE_DIR) / "experiments";
         const auto minimum = water_sort::read_instance(experiments / "minimum-h5-ce-000.txt");
         std::vector<water_sort::Color> bottom_layer(minimum.color_count);
         std::iota(bottom_layer.begin(), bottom_layer.end(), water_sort::Color{0});

@@ -109,6 +109,7 @@ if(BUILD_TESTING)
             --seconds 0
             --iterations 10
             --solution-cap 10
+            --fitness safe-initial
             --height 6
             --colors 4
             --empty 2
@@ -116,6 +117,20 @@ if(BUILD_TESTING)
             --isolate-uniform-layer 1
             --fully-alternating 1
             --out ${CMAKE_CURRENT_BINARY_DIR}/test-uniform-layer-output)
+    add_test(NAME water-hunter-seeded-no-smoke
+        COMMAND water-hunter
+            --input ${CMAKE_CURRENT_SOURCE_DIR}/experiments/c4-k2-h9-no-000.txt
+            --seconds 0
+            --iterations 1
+            --solution-cap 10
+            --fitness safe-initial
+            --restart-interval 0
+            --height 9
+            --colors 4
+            --empty 2
+            --out ${CMAKE_CURRENT_BINARY_DIR}/test-seeded-no-output)
+    set_tests_properties(water-hunter-seeded-no-smoke PROPERTIES
+        PASS_REGULAR_EXPRESSION "COUNTEREXAMPLE FOUND IN SEED")
     add_test(NAME water-descend-noop-smoke
         COMMAND water-descend
             --input ${CMAKE_CURRENT_SOURCE_DIR}/experiments/minimum-h5-ce-000.txt
