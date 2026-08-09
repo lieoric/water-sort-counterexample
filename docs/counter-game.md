@@ -208,7 +208,7 @@ took about six minutes including build and tests.
 These are complete finite-height results only.  They neither prove that the
 same controller wins at `h=7` and beyond nor establish an induction that
 collapses arbitrary run lengths to the tested state space. A separately
-certified Water instance is already NO at `h=9`.
+certified Water instance is already NO at `h=8`.
 
 ## What this settles, and what it does not
 
@@ -223,7 +223,7 @@ arbitrary-height online proof.  It does not rule out:
 - a strategy that inspects the known hidden suffixes of the input instance;
 - a stronger finite abstraction that remembers additional run information;
 - a global existence proof whose source choices depend on the whole instance;
-- the behavior at the two unresolved fixed heights `h=7` and `h=8`.
+- the behavior at the unresolved fixed height `h=7`.
 
 Likewise, the `next-run` successes through `h=6` prove those finite heights,
 not an infinite-height theorem.  A losing online game would still

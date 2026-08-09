@@ -76,6 +76,22 @@ NO-existence parameter pair. The `(4,5,2)` result is from
 
 ## Four colors, two empty columns
 
+`c4-k2-h8-no-000` through `c4-k2-h8-no-002` are three inequivalent balanced
+height-8 NO instances. The first has the symmetric form
+
+```text
+22111003 / 22111003 / 00333221 / 00333221
+```
+
+Their checked top-border certificates contain respectively 60/68/68 marked
+states and 236/272/272 examined transitions. Independent exact physical-state
+BFS runs exhaust respectively 72/270/187 states and also return NO. Complete
+balanced one-layer deletion gives 5/54/54 canonical height-7 children; all
+113 are YES. Since the bounded next-run game proves every instance through
+height 6 solvable, the global minimum height is now in `{7,8}`.
+
+An earlier, structurally different witness is retained at height 9.
+
 `c4-k2-h9-no-000` is a balanced height-9 NO instance:
 
 ```text
@@ -85,11 +101,10 @@ NO-existence parameter pair. The `(4,5,2)` result is from
 The checked top-border closure contains 41 marked states and 163 examined
 transitions. An independent exact physical-state BFS, using forced maximal
 bulk pours and locked completed monochrome columns, exhausts 184 states and
-also returns NO. The bounded next-run game proves every instance through
-height 6 solvable, so the global minimum height is currently in `{7,8,9}`.
+also returns NO.
 
 For this witness's fixed 16-run/12-border color skeleton, exhaustive positive
 run-length enumeration is sharper: all 1,725 canonical height-8 assignments
-are YES, while 4 of 8,264 height-9 assignments are NO. All nine canonical
+are YES, while 4 of 8,264 height-9 assignments are NO. All 24 canonical
 balanced one-layer deletions of the committed witness are YES. These are exact
 local-family results, not a proof that every height-8 arrangement is solvable.

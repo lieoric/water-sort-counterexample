@@ -93,12 +93,14 @@ void enumerate_balanced_children(const water_sort::Instance& parent,
         return;
     }
 
-    std::uint64_t colors_seen_in_column = 0;
     for (std::size_t position = 0; position < parent.columns[column].size(); ++position) {
         const auto color = parent.columns[column][position];
         const auto bit = std::uint64_t{1} << color;
-        if ((used_colors & bit) != 0 || (colors_seen_in_column & bit) != 0) continue;
-        colors_seen_in_column |= bit;
+        if ((used_colors & bit) != 0) continue;
+        // Removing any one item from the same monochrome run produces the
+        // same child, but separated runs of one color can produce different
+        // children and must all be retained.
+        if (position != 0 && parent.columns[column][position - 1] == color) continue;
         removals[column] = position;
         enumerate_balanced_children(parent, column + 1, used_colors | bit,
                                     removals, output, seen);

@@ -1,0 +1,9 @@
+# Third inequivalent balanced four-color/two-empty counterexample.
+# Columns are written bottom-to-top.
+height=8
+colors=4
+empty=2
+column=22311100
+column=22311102
+column=00133302
+column=02133302

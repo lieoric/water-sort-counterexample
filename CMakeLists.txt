@@ -138,6 +138,12 @@ if(BUILD_TESTING)
             --frontier-limit 4
             --seed 1
             --out ${CMAKE_CURRENT_BINARY_DIR}/test-descend-output)
+    add_test(NAME water-descend-separated-runs-regression
+        COMMAND ${CMAKE_COMMAND}
+            -DPROGRAM=$<TARGET_FILE:water-descend>
+            -DINPUT=${CMAKE_CURRENT_SOURCE_DIR}/experiments/c4-k2-h8-no-001.txt
+            -DOUT=${CMAKE_CURRENT_BINARY_DIR}/test-descend-separated-runs-output
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/check_descend_separated_runs.cmake)
     add_test(NAME water-policy-learn-smoke
         COMMAND water-policy-learn
             --height 3

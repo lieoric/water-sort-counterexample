@@ -11,6 +11,7 @@
 #include <numeric>
 #include <stdexcept>
 #include <string>
+#include <tuple>
 #include <vector>
 
 namespace {
@@ -208,6 +209,37 @@ void run_tests() {
                     analysis.signatures.begin()->first.compact() == "a2-d2-h3-n3,3,3,3,3" &&
                     analysis.signatures.begin()->second == 60,
                 "unexpected deadlock signature for ce-000");
+    }
+
+    {
+        const auto experiments = std::filesystem::path(WSC_SOURCE_DIR) / "experiments";
+        const auto symmetric = water_sort::read_instance(
+            experiments / "c4-k2-h8-no-000.txt");
+        const auto independent = water_sort::read_instance(
+            experiments / "c4-k2-h8-no-001.txt");
+        const auto third = water_sort::read_instance(
+            experiments / "c4-k2-h8-no-002.txt");
+        for (const auto& [instance, certificate, physical_states] :
+             std::vector<std::tuple<water_sort::Instance,
+                                    std::filesystem::path,
+                                    std::uint64_t>>{
+                 {symmetric, experiments / "c4-k2-h8-no-000.wscert", 72},
+                 {independent, experiments / "c4-k2-h8-no-001.wscert", 270},
+                 {third, experiments / "c4-k2-h8-no-002.wscert", 187}}) {
+            const water_sort::BorderOracle oracle(instance);
+            const auto border = oracle.solve();
+            const auto frontier = oracle.policy_table_to_exhausted_columns(2);
+            require(!border.solvable && oracle.count_solutions(100).solutions == 0 &&
+                        frontier.solvable[frontier.initial_state] == 0 &&
+                        frontier.safe_columns[frontier.initial_state] == 0,
+                    "four-color height-8 obstruction unexpectedly solved");
+            require(water_sort::verify_no_certificate(instance, certificate).valid,
+                    "four-color height-8 obstruction certificate failed verification");
+            const auto water = water_sort::solve_water_exact(instance, 1'000'000);
+            require(water.status == water_sort::WaterSolveStatus::unsolvable &&
+                        water.states_visited == physical_states,
+                    "full locked bulk-Water BFS did not confirm the height-8 NO");
+        }
     }
 
     {

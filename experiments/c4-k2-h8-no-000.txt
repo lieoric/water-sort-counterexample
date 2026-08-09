@@ -1,0 +1,9 @@
+# Symmetric balanced four-color/two-empty counterexample.
+# Columns are written bottom-to-top.
+height=8
+colors=4
+empty=2
+column=22111003
+column=22111003
+column=00333221
+column=00333221

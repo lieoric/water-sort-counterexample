@@ -108,28 +108,30 @@ E(c,h,1)  <=>  c >= 2 and h >= 2 and c + h >= 6.
 The three minimal witnesses and independently checked certificates are stored
 under `experiments/`.
 
-For two empty columns, a newly certified four-color obstruction is
+For two empty columns, the smallest currently certified four-color obstruction
+height is 8. One especially symmetric witness is
 
 ```text
-h=9
-222311112 / 223333002 / 200111002 / 113333000
+h=8
+22111003 / 22111003 / 00333221 / 00333221
 ```
 
 with columns written bottom-to-top. The exact border oracle finds zero
-solutions; the independent closure certificate marks 41 states and checks 163
+solutions; the independent closure certificate marks 60 states and checks 236
 transitions. A separate full physical-state BFS, using forced maximal bulk
 pours and locked completed columns rather than the border abstraction,
-exhausts 184 states and also returns NO. Therefore
+exhausts 72 states and also returns NO. Two more inequivalent height-8
+witnesses are committed as independent regressions. Therefore
 
 ```text
-E(4,h,2) holds for every h >= 9.
+E(4,h,2) holds for every h >= 8.
 ```
 
 The audited next-run game proves every balanced four-color instance through
 height 6 solvable. Thus the minimum four-color/two-empty obstruction height is
-currently narrowed to `7 <= h_min <= 9`; the committed height-9 witness is
-also minimal under every single balanced one-layer deletion, but that local
-fact does not exclude unrelated height-7 or height-8 obstructions.
+currently narrowed to `7 <= h_min <= 8`. Every direct balanced one-layer
+deletion of all three committed height-8 witnesses is solvable, but that local fact
+does not exclude an unrelated height-7 obstruction.
 
 ## What is implemented
 
@@ -318,7 +320,7 @@ bounded Ito buffer-demand state into every unit scene. Across the same 4,301
 instances, two visible runs without counters still have 82 conflicts, while
 two visible runs plus demand counters have **zero sampled conflicts** over
 241,349 macro checkpoints and 1,271,582 unit moves. This is a finite-catalog
-candidate controller; the committed height-9 NO shows that it cannot
+candidate controller; the committed height-8 NO shows that it cannot
 extend to a universal all-height solver. See
 [`31333399467`](https://github.com/lieoric/water-sort-counterexample/actions/runs/31333399467).
 
@@ -338,7 +340,7 @@ This validates physical realization on the finite catalog; it does not imply
 an arbitrary-height macro policy. See
 [`31334595589`](https://github.com/lieoric/water-sort-counterexample/actions/runs/31334595589).
 
-Before the height-9 obstruction was found, the all-height question was also
+Before the height-8 obstruction was found, the all-height question was also
 attacked as a bounded counter game.
 Bare `Q=(z,a_i,s_i,d_c)` observations first lose at height 5, proving that
 those counters alone cannot support one online controller. If every column's
@@ -346,7 +348,7 @@ next maximal color run is committed and visible before source choice, the
 exact game has no losing initial observation through height 6. At height 6
 this closes 23,460,258 reachable observations; 231,105 losing local states are
 all avoidable from all 361,334 initial observations. These results prove the
-universal safe range through height 6, while the committed height-9 Water NO
+universal safe range through height 6, while the committed height-8 Water NO
 independently disproves the all-height claim.
 See [the bounded counter-game definition and results](docs/counter-game.md).
 
@@ -355,8 +357,8 @@ symmetry-reduced covering at one fixed height without first enumerating
 arrangements.
 It exactly reconstructs the known `c=2,h=4,k=1` NO witness and returns UNSAT
 on already-known low four-color safe cases. Its sharded workflow is now an
-independent fixed-height cross-check and a possible route to resolving heights
-7 and 8. Finite UNSAT runs have no retained solver proof object, so they are
+independent fixed-height cross-check and a possible route to resolving height
+7. Finite UNSAT runs have no retained solver proof object, so they are
 reported separately from checked transition-closure certificates.
 
 For an unsolvable instance, write and independently check a certificate:
@@ -537,9 +539,9 @@ current two-empty safe region includes
 
 Together with a certified NO witness at `(5,5,2)`, these two safe rectangles
 prove that `(5,5)` is a minimal NO-existence parameter pair for `k=2`.
-For exactly four colors, the certified height-9 witness and height monotonicity
-give NO instances at every `h>=9`; the first NO height remains one of 7, 8,
-or 9.
+For exactly four colors, the certified height-8 witnesses and height
+monotonicity give NO instances at every `h>=8`; the first NO height is either
+7 or 8.
 
 The height-4 run examined 113,291,534 orderly representations before exact
 symmetry canonicalization. See
