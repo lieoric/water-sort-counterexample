@@ -1,0 +1,147 @@
+name: Synthesize c4 k2 controlled policy
+run-name: Controlled d3 policy over frontier catalog
+
+on:
+  # Bootstrap this research workflow before the draft PR reaches main.
+  push:
+    branches: [agent/minimum-height-five]
+    paths: [.github/workflows/c4-controlled-policy.yml]
+  workflow_dispatch:
+    inputs:
+      source_run:
+        description: Frontier-policy run containing the merged catalog
+        required: true
+        default: "31328370710"
+        type: string
+      attempts:
+        description: Independent randomized attempts
+        required: true
+        default: "4"
+        type: choice
+        options: ["1", "2", "4", "8"]
+      restarts:
+        description: Restarts per attempt
+        required: true
+        default: "256"
+        type: string
+      repair_passes:
+        description: Policy repairs per restart
+        required: true
+        default: "128"
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: c4-k2-controlled-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      attempts: ${{ steps.matrix.outputs.attempts }}
+    steps:
+      - uses: actions/checkout@v5
+      - name: Build attempt matrix
+        id: matrix
+        env:
+          ATTEMPT_COUNT: ${{ inputs.attempts || '4' }}
+        run: echo "attempts=$(jq -cn --argjson count "$ATTEMPT_COUNT" '[range(0; $count)]')" >> "$GITHUB_OUTPUT"
+      - name: Download the exact sampled catalog
+        uses: actions/download-artifact@v6
+        with:
+          name: frontier-merged-all-heights
+          path: source
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.source_run || '31328370710' }}
+      - name: Build and test once
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DWSC_WARNINGS_AS_ERRORS=ON
+          cmake --build build --parallel 2
+          ctest --test-dir build --output-on-failure
+          test -s source/instances.tsv
+          test -s source/conflicts.tsv
+          mkdir bundle
+          cp build/water-policy-control bundle/
+          cp source/instances.tsv source/conflicts.tsv bundle/
+          tar -czf controlled-policy-inputs.tar.gz bundle
+      - uses: actions/upload-artifact@v6
+        with:
+          name: controlled-policy-inputs
+          path: controlled-policy-inputs.tar.gz
+          retention-days: 7
+
+  synthesize:
+    needs: prepare
+    name: Attempt ${{ matrix.attempt }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      max-parallel: 8
+      matrix:
+        attempt: ${{ fromJSON(needs.prepare.outputs.attempts) }}
+    steps:
+      - uses: actions/download-artifact@v6
+        with:
+          name: controlled-policy-inputs
+      - run: tar -xzf controlled-policy-inputs.tar.gz
+      - name: Search only the states induced by one shared controller
+        env:
+          RESTARTS: ${{ inputs.restarts || '256' }}
+          REPAIR_PASSES: ${{ inputs.repair_passes || '128' }}
+        run: |
+          seed=$((${{ github.run_id }} * 16 + ${{ matrix.attempt }}))
+          bundle/water-policy-control \
+            --catalog bundle/instances.tsv \
+            --conflicts bundle/conflicts.tsv \
+            --depth 3 \
+            --goal-exhausted 2 \
+            --restarts "$RESTARTS" \
+            --repair-passes "$REPAIR_PASSES" \
+            --seed "$seed" \
+            --out "out/attempt-${{ matrix.attempt }}"
+      - name: Add attempt report to summary
+        if: always()
+        run: |
+          report="out/attempt-${{ matrix.attempt }}/report.json"
+          if test -f "$report"; then
+            echo '```json' >> "$GITHUB_STEP_SUMMARY"
+            cat "$report" >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: controlled-attempt-${{ matrix.attempt }}
+          path: out/attempt-${{ matrix.attempt }}/
+          if-no-files-found: error
+          retention-days: 30
+
+  merge:
+    needs: [prepare, synthesize]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v6
+        with:
+          pattern: controlled-attempt-*
+          path: collected
+      - name: Merge independent attempts
+        env:
+          ATTEMPTS: ${{ inputs.attempts || '4' }}
+        run: |
+          python3 scripts/merge_control_reports.py \
+            --input collected \
+            --output merged \
+            --expected-attempts "$ATTEMPTS"
+          cat merged/summary.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v6
+        with:
+          name: controlled-policy-merged
+          path: merged/
+          retention-days: 30

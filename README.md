@@ -125,6 +125,9 @@ under `experiments/`.
   full-column permutations, followed by exact oracle classification.
 - `water-policy-learn`: exact safe-action extraction and thin-layer scene
   conflict discovery for a candidate finite policy.
+- `water-policy-control`: randomized synthesis of one shared thin-layer
+  controller over an exact catalog, checking only the states induced by that
+  controller.
 - A literal full-state Water BFS with forced bulk moves and locked completed
   columns, used only as a small-instance reference implementation.
 - Exhaustive cross-checks over 1,796 small initial arrangements, plus the
@@ -206,6 +209,25 @@ columns have no borders and mutate only the hidden tails:
 
 The `Attack c4 k2 frontier policy` workflow runs this experiment across
 several heights and performs a final cross-height signature merge.
+
+The global merge can report conflicts that a deterministic controller never
+needs to visit. Test that stronger, controlled-reachability question against
+the merged catalog with:
+
+```bash
+./build/water-policy-control \
+  --catalog out/all-heights/instances.tsv \
+  --conflicts out/all-heights/conflicts.tsv \
+  --depth 3 --goal-exhausted 2 \
+  --restarts 256 --repair-passes 128 --seed 1 \
+  --out out/controlled-policy
+```
+
+`success=true` supplies one deterministic action table that carries every
+catalog instance to the two-exhausted-column frontier. It is still a finite
+sample result; `success=false` only exhausts the randomized restart budget.
+The `Synthesize c4 k2 controlled policy` workflow repeats the search with
+independent seeds and merges their reports.
 
 For an unsolvable instance, write and independently check a certificate:
 

@@ -119,6 +119,15 @@ void run_tests() {
         require(view.columns.size() == 2 && view.columns[0].visible_runs.size() == 2 &&
                     view.columns[1].visible_runs.size() == 2,
                 "policy view did not expose the requested top boundary");
+        std::size_t safe_column = 0;
+        while ((frontier.safe_columns[frontier.initial_state] &
+                (std::uint64_t{1} << safe_column)) == 0) {
+            ++safe_column;
+        }
+        const auto successor = oracle.policy_successor(frontier.initial_state, safe_column);
+        require(successor < frontier.initial_state &&
+                    frontier.solvable[successor] != 0,
+                "policy successor did not remove exactly one source border");
     }
     {
         const auto no_instance = ito_h3_k2_n9();

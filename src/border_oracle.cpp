@@ -375,6 +375,16 @@ PolicyStateView BorderOracle::policy_state(std::uint32_t state,
     return result;
 }
 
+std::uint32_t BorderOracle::policy_successor(std::uint32_t state,
+                                              std::size_t column) const {
+    if (state >= state_count_ || column >= instance_.columns.size()) {
+        throw std::runtime_error("policy successor is out of range");
+    }
+    const auto rank = (state / multiplier_[column]) % radix_[column];
+    if (rank == 0) throw std::runtime_error("exhausted policy column has no successor");
+    return state - multiplier_[column];
+}
+
 AnalysisResult BorderOracle::analyze() const {
     AnalysisResult result;
     std::vector<std::uint8_t> seen((state_count_ + 7U) / 8U, 0);

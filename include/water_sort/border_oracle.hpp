@@ -85,6 +85,8 @@ public:
         std::uint32_t target_exhausted_columns) const;
     [[nodiscard]] PolicyStateView policy_state(std::uint32_t state,
                                                std::uint32_t visible_boundaries) const;
+    [[nodiscard]] std::uint32_t policy_successor(std::uint32_t state,
+                                                 std::size_t column) const;
     [[nodiscard]] std::uint32_t state_count() const { return state_count_; }
 
 private:

@@ -41,9 +41,9 @@ Each of the four colors needs at most one such bin, so at `r >= 2` every
 remaining border is removable.
 
 The focused experiment therefore uses `--goal-exhausted 2`. Its safe mask
-means “can still reach two exhausted columns,” rather than “can still reach the
-fully sorted border table.” This removes the already-trivial suffix from the
-proof obligation.
+means "can still reach two exhausted columns," rather than "can still reach
+the fully sorted border table." This removes the already-trivial suffix from
+the proof obligation.
 
 `--tail-mutations N --tail-swaps M` creates related balanced instances by
 protecting the visible top runs and swapping items only in deeper hidden tails.
@@ -55,7 +55,30 @@ again across every requested height. A cross-height conflict is a finite scene
 summary for which the observed hidden completions share no frontier-winning
 action.
 
+## Controlled reachability
+
+The all-state merge is deliberately severe: it requires one action to work in
+every reachable solvable state with the same signature, including states that
+a sensible controller could avoid. `water-policy-control` asks the more useful
+question. It assigns one action to each depth-`d` signature, simulates only the
+trajectories induced by those assignments, and repairs or restarts whenever a
+new induced state invalidates an assignment.
+
+The supplied `conflicts.tsv` is diagnostic only. A formerly conflicting
+signature may be used if the chosen trajectories encounter a compatible
+subset of its concrete states. Every transition is checked against the exact
+frontier-winning action table for that particular instance.
+
+This remains randomized finite-catalog synthesis:
+
+- success is a replayable policy certificate for every catalog row;
+- failure only means that the restart budget found no shared controller; and
+- an all-height theorem still needs a symbolic closure proof over every
+  possible hidden suffix.
+
 ## Local use
+
+Collect observations:
 
 ```bash
 ./build/water-policy-learn \
@@ -64,16 +87,27 @@ action.
   --out out/policy-d3
 ```
 
-The output directory contains:
+The observation output directory contains:
 
 - `report.json`: sample and coverage totals;
 - `signatures.tsv`: one row per canonical scene signature;
 - `conflicts.tsv`: signatures whose observed safe-action intersection is empty;
 - `instances.tsv`: exact initial columns keyed by the fingerprints used in
-  signature witnesses, so a conflict can be reconstructed;
+  signature witnesses, so a conflict can be reconstructed; and
 - `counterexample.txt` and `counterexample.wscert`, if sampling finds a NO
   instance.
 
-The `Learn thin-layer policy` GitHub Actions workflow runs multiple observation
-depths and random shards in parallel, merges equal signatures across shards,
-and publishes one merged artifact per depth.
+Search a shared controller over a merged catalog:
+
+```bash
+./build/water-policy-control \
+  --catalog merged/instances.tsv \
+  --conflicts merged/conflicts.tsv \
+  --depth 3 --goal-exhausted 2 \
+  --restarts 256 --repair-passes 128 --seed 1 \
+  --out out/controlled
+```
+
+The `Attack c4 k2 frontier policy` workflow collects exact observations and
+the `Synthesize c4 k2 controlled policy` workflow launches independent
+controlled-policy attempts over the resulting catalog.
