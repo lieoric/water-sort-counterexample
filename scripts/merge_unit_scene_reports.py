@@ -113,7 +113,7 @@ def main() -> None:
     args = parser.parse_args()
 
     reports = []
-    by_window = {2: {}, 3: {}, 4: {}, 5: {}}
+    by_window = {2: {}, 3: {}, 4: {}, 5: {}, 6: {}}
     exception_counts: dict[str, int] = {}
     occurrence_rows = []
     for report_path in sorted(args.input.rglob("report.json")):
@@ -168,7 +168,7 @@ def main() -> None:
     }
     refinements = {
         window: write_refinements(args.output, by_window, window)
-        for window in (3, 4)
+        for window in (3, 4, 5)
     }
     with (args.output / "exception_coverage.tsv").open(
         "w", encoding="utf-8"
@@ -207,14 +207,18 @@ def main() -> None:
         "scenes_w3": len(by_window[3]),
         "scenes_w4": len(by_window[4]),
         "scenes_w5": len(by_window[5]),
+        "scenes_w6": len(by_window[6]),
         "conflicts_w2": conflicts[2],
         "conflicts_w3": conflicts[3],
         "conflicts_w4": conflicts[4],
         "conflicts_w5": conflicts[5],
+        "conflicts_w6": conflicts[6],
         "w3_conflict_refinements_w4": refinements[3][0],
         "w3_conflict_refinement_conflicts_w4": refinements[3][1],
         "w4_conflict_refinements_w5": refinements[4][0],
         "w4_conflict_refinement_conflicts_w5": refinements[4][1],
+        "w5_conflict_refinements_w6": refinements[5][0],
+        "w5_conflict_refinement_conflicts_w6": refinements[5][1],
         "macro_local_unit_traces": True,
         "continuous_physical_controller_proved": False,
     }
@@ -238,12 +242,16 @@ def main() -> None:
 - Window 3: {totals['scenes_w3']} scenes, **{totals['conflicts_w3']} conflicts**
 - Window 4: {totals['scenes_w4']} scenes, **{totals['conflicts_w4']} conflicts**
 - Window 5: {totals['scenes_w5']} scenes, **{totals['conflicts_w5']} conflicts**
+- Window 6: {totals['scenes_w6']} scenes, **{totals['conflicts_w6']} conflicts**
 - The {totals['conflicts_w3']} ambiguous window-3 scenes split into
   {totals['w3_conflict_refinements_w4']} window-4 refinements, with
   **{totals['w3_conflict_refinement_conflicts_w4']} remaining conflicts**
 - The {totals['conflicts_w4']} ambiguous window-4 scenes split into
   {totals['w4_conflict_refinements_w5']} window-5 refinements, with
   **{totals['w4_conflict_refinement_conflicts_w5']} remaining conflicts**
+- The {totals['conflicts_w5']} ambiguous window-5 scenes split into
+  {totals['w5_conflict_refinements_w6']} window-6 refinements, with
+  **{totals['w5_conflict_refinement_conflicts_w6']} remaining conflicts**
 
 Every selected border removal is expanded into legal one-item moves from a
 canonical tight representative. The representative is rebuilt at the next

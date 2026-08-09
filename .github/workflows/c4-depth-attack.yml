@@ -150,7 +150,7 @@ jobs:
           pattern: depth-policy-*
           path: policies
       - run: tar -xzf depth-attack-inputs.tar.gz
-      - name: Attack observation windows two through five
+      - name: Attack observation windows two through six
         run: |
           mapfile -t policies_found < <(find policies -name policy.tsv -type f | sort)
           test "${#policies_found[@]}" -eq "${{ inputs.policy_attempts || '2' }}"
