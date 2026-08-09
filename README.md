@@ -108,6 +108,15 @@ E(c,h,1)  <=>  c >= 2 and h >= 2 and c + h >= 6.
 The three minimal witnesses and independently checked certificates are stored
 under `experiments/`.
 
+For three colors and two empty columns, an analytic deadlock-bypass argument
+now proves every balanced instance through height 8 solvable.  Independently,
+the complete height-7 16-shard scan examined 26,717,100 orderly
+representations and classified all 11,094,455 exact symmetry classes as YES,
+with no shard stopped early.  The published general empty-column bound
+directly covers only heights at most 3 here, and no arbitrary-height theorem
+is claimed.  See [the proof](docs/three-color-two-empty.md) and
+[`31339686115`](https://github.com/lieoric/water-sort-counterexample/actions/runs/31339686115).
+
 For two empty columns, the smallest currently certified four-color obstruction
 height is 8. One especially symmetric witness is
 
@@ -162,7 +171,7 @@ does not exclude an unrelated height-7 obstruction.
   paths using real forced maximal bulk moves, without rebuilding a canonical
   physical state.
 - `water-counter-game`: exact finite-height online-game analysis of the
-  four-color/two-empty macro question, with either bare counter
+  three-or-four-color/two-empty macro question, with either bare counter
   observations or every current next color run committed before source choice.
 - `scripts/smt_counterexample.py`: joint fixed-height SMT search over both the
   unknown balanced arrangement and its complete exact top-border winning DAG;

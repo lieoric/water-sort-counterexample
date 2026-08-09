@@ -19,15 +19,19 @@
 
 namespace {
 
-constexpr std::size_t kColors = 4;
-constexpr std::size_t kOriginalColumns = 4;
+constexpr std::size_t kMaxColors = 4;
+constexpr std::size_t kMaxOriginalColumns = 4;
 constexpr std::size_t kEmptyColumns = 2;
-constexpr std::size_t kTargetExhausted = 2;
+
+std::uint8_t target_exhausted(std::uint8_t colors) {
+    return static_cast<std::uint8_t>(colors - kEmptyColumns);
+}
 
 enum class ObservationMode { q_only, next_run };
 
 struct Options {
     std::uint32_t height = 0;
+    std::uint8_t colors = 4;
     std::filesystem::path report = "counter-game-report.json";
     std::filesystem::path witness = "counter-game-witness.txt";
     std::uint64_t max_states = 5'000'000;
@@ -45,7 +49,7 @@ void ensure_parent(const std::filesystem::path& path);
 struct ColorBucket {
     std::int32_t deficit = 0;
     std::uint8_t count = 0;
-    std::array<std::uint16_t, kOriginalColumns> exposed{};
+    std::array<std::uint16_t, kMaxOriginalColumns> exposed{};
 
     friend bool operator==(const ColorBucket& lhs, const ColorBucket& rhs) {
         return lhs.deficit == rhs.deficit && lhs.count == rhs.count &&
@@ -60,17 +64,22 @@ bool bucket_less(const ColorBucket& lhs, const ColorBucket& rhs) {
 }
 
 struct State {
+    std::uint8_t color_count = 0;
     std::uint8_t exhausted = 0;
-    std::array<ColorBucket, kColors> colors{};
+    std::array<ColorBucket, kMaxColors> colors{};
 
     friend bool operator==(const State& lhs, const State& rhs) {
-        return lhs.exhausted == rhs.exhausted && lhs.colors == rhs.colors;
+        return lhs.color_count == rhs.color_count &&
+               lhs.exhausted == rhs.exhausted && lhs.colors == rhs.colors;
     }
 };
 
 bool state_less(const State& lhs, const State& rhs) {
+    if (lhs.color_count != rhs.color_count) {
+        return lhs.color_count < rhs.color_count;
+    }
     if (lhs.exhausted != rhs.exhausted) return lhs.exhausted < rhs.exhausted;
-    for (std::size_t color = 0; color < kColors; ++color) {
+    for (std::size_t color = 0; color < lhs.color_count; ++color) {
         if (bucket_less(lhs.colors[color], rhs.colors[color])) return true;
         if (bucket_less(rhs.colors[color], lhs.colors[color])) return false;
     }
@@ -87,7 +96,7 @@ std::size_t hash_combine(std::size_t seed, std::size_t value) {
 
 struct StateHash {
     std::size_t operator()(const State& state) const noexcept {
-        std::size_t seed = state.exhausted;
+        std::size_t seed = hash_combine(state.color_count, state.exhausted);
         for (const auto& bucket : state.colors) {
             seed = hash_combine(seed,
                                 std::hash<std::int32_t>{}(bucket.deficit));
@@ -108,8 +117,24 @@ void normalize_bucket(ColorBucket& bucket) {
 }
 
 State canonicalize(State state) {
-    for (auto& bucket : state.colors) normalize_bucket(bucket);
-    std::sort(state.colors.begin(), state.colors.end(), bucket_less);
+    for (std::size_t color = 0; color < state.color_count; ++color) {
+        normalize_bucket(state.colors[color]);
+    }
+    // The array has a compile-time maximum of four entries while the active
+    // prefix is selected at runtime.  A tiny insertion sort keeps that prefix
+    // explicit and avoids relying on an unchecked runtime end iterator.
+    for (std::size_t index = 1; index < state.color_count; ++index) {
+        auto bucket = state.colors[index];
+        auto position = index;
+        while (position != 0 &&
+               bucket_less(bucket, state.colors[position - 1])) {
+            state.colors[position] = state.colors[position - 1];
+            --position;
+        }
+        state.colors[position] = bucket;
+    }
+    std::fill(state.colors.begin() + state.color_count, state.colors.end(),
+              ColorBucket{});
     return state;
 }
 
@@ -121,13 +146,16 @@ std::uint32_t bucket_exposed(const ColorBucket& bucket) {
 
 std::uint32_t active_columns(const State& state) {
     std::uint32_t result = 0;
-    for (const auto& bucket : state.colors) result += bucket.count;
+    for (std::size_t color = 0; color < state.color_count; ++color) {
+        result += state.colors[color].count;
+    }
     return result;
 }
 
 std::uint32_t remaining_items(const State& state, std::uint32_t height) {
     std::uint32_t result = 0;
-    for (const auto& bucket : state.colors) {
+    for (std::size_t color = 0; color < state.color_count; ++color) {
+        const auto& bucket = state.colors[color];
         for (std::size_t index = 0; index < bucket.count; ++index) {
             result += height - bucket.exposed[index];
         }
@@ -135,9 +163,9 @@ std::uint32_t remaining_items(const State& state, std::uint32_t height) {
     return result;
 }
 
-std::array<std::int32_t, kColors> exposed_counts(const State& state) {
-    std::array<std::int32_t, kColors> result{};
-    for (std::size_t color = 0; color < kColors; ++color) {
+std::array<std::int32_t, kMaxColors> exposed_counts(const State& state) {
+    std::array<std::int32_t, kMaxColors> result{};
+    for (std::size_t color = 0; color < state.color_count; ++color) {
         result[color] = state.colors[color].deficit +
                         static_cast<std::int32_t>(bucket_exposed(
                             state.colors[color]));
@@ -151,16 +179,17 @@ std::array<std::int32_t, kColors> exposed_counts(const State& state) {
 // a color different from a_i.  Exhausted columns contribute z*h unconstrained
 // exposed positions.  F_c=d_c+sum_{a_i=c}s_i recovers the exposed color totals.
 bool algebraically_consistent(const State& state, std::uint32_t height) {
-    if (state.exhausted > kOriginalColumns) return false;
-    if (active_columns(state) + state.exhausted != kOriginalColumns) {
+    if (state.color_count < 3 || state.color_count > kMaxColors) return false;
+    if (state.exhausted > state.color_count) return false;
+    if (active_columns(state) + state.exhausted != state.color_count) {
         return false;
     }
 
     std::uint32_t sum_s = 0;
     std::int64_t sum_d = 0;
     std::int64_t sum_f = 0;
-    std::array<std::int32_t, kColors> remaining{};
-    for (std::size_t color = 0; color < kColors; ++color) {
+    std::array<std::int32_t, kMaxColors> remaining{};
+    for (std::size_t color = 0; color < state.color_count; ++color) {
         const auto& bucket = state.colors[color];
         for (std::size_t index = 0; index < bucket.count; ++index) {
             const auto value = bucket.exposed[index];
@@ -168,7 +197,7 @@ bool algebraically_consistent(const State& state, std::uint32_t height) {
             if (index != 0 && bucket.exposed[index - 1] > value) return false;
             sum_s += value;
         }
-        for (std::size_t index = bucket.count; index < kOriginalColumns;
+        for (std::size_t index = bucket.count; index < kMaxOriginalColumns;
              ++index) {
             if (bucket.exposed[index] != 0) return false;
         }
@@ -193,7 +222,8 @@ bool algebraically_consistent(const State& state, std::uint32_t height) {
     }
 
     const auto total_hidden = std::accumulate(remaining.begin(),
-                                               remaining.end(),
+                                               remaining.begin() +
+                                                   state.color_count,
                                                std::int32_t{0});
     if (total_hidden != static_cast<std::int32_t>(remaining_items(state,
                                                                    height))) {
@@ -202,9 +232,9 @@ bool algebraically_consistent(const State& state, std::uint32_t height) {
 
     // Hall's condition for choosing the first hidden item of every active
     // column.  A column topped by c may use every remaining color except c.
-    // Intersections of two different forbidden-color classes have all four
-    // colors available, so these four inequalities are also sufficient.
-    for (std::size_t color = 0; color < kColors; ++color) {
+    // Intersections of two different forbidden-color classes have every
+    // color available, so these per-color inequalities are also sufficient.
+    for (std::size_t color = 0; color < state.color_count; ++color) {
         if (static_cast<std::int32_t>(state.colors[color].count) >
             total_hidden - remaining[color]) {
             return false;
@@ -215,7 +245,8 @@ bool algebraically_consistent(const State& state, std::uint32_t height) {
 
 bool is_initial_projection(const State& state, std::uint32_t height) {
     if (state.exhausted == 0) {
-        return std::all_of(state.colors.begin(), state.colors.end(),
+        return std::all_of(state.colors.begin(),
+                           state.colors.begin() + state.color_count,
                            [](const ColorBucket& bucket) {
                                return bucket.deficit == 0;
                            });
@@ -223,7 +254,8 @@ bool is_initial_projection(const State& state, std::uint32_t height) {
     if (state.exhausted != 1) return false;
 
     std::size_t full_deficits = 0;
-    for (const auto& bucket : state.colors) {
+    for (std::size_t color = 0; color < state.color_count; ++color) {
+        const auto& bucket = state.colors[color];
         if (bucket.deficit == static_cast<std::int32_t>(height)) {
             ++full_deficits;
         } else if (bucket.deficit != 0) {
@@ -242,7 +274,7 @@ struct SourceAction {
 std::uint8_t source_demand(const State& state, std::uint8_t source_color,
                            std::uint16_t exposed) {
     std::uint8_t demand = 0;
-    for (std::size_t color = 0; color < kColors; ++color) {
+    for (std::size_t color = 0; color < state.color_count; ++color) {
         auto value = state.colors[color].deficit;
         if (color == source_color) value += exposed;
         if (value > 0) ++demand;
@@ -254,7 +286,7 @@ std::vector<SourceAction> legal_actions(const State& state) {
     std::vector<SourceAction> actions;
     const auto available = static_cast<std::uint8_t>(kEmptyColumns +
                                                       state.exhausted);
-    for (std::uint8_t color = 0; color < kColors; ++color) {
+    for (std::uint8_t color = 0; color < state.color_count; ++color) {
         const auto& bucket = state.colors[color];
         // Equal adjacent buckets are exchanged by a color automorphism of Q.
         // Keeping only the first makes these source choices genuine action
@@ -286,7 +318,7 @@ void remove_exposed(ColorBucket& bucket, std::uint16_t exposed) {
 }
 
 void add_exposed(ColorBucket& bucket, std::uint16_t exposed) {
-    if (bucket.count >= kOriginalColumns) {
+    if (bucket.count >= kMaxOriginalColumns) {
         throw std::logic_error("too many active sources in color bucket");
     }
     bucket.exposed[bucket.count++] = exposed;
@@ -304,7 +336,7 @@ std::vector<Outcome> outcomes(const State& state, const SourceAction& action,
                               std::uint32_t height) {
     std::vector<Outcome> result;
     const auto hidden = height - action.exposed;
-    for (std::uint8_t revealed = 0; revealed < kColors; ++revealed) {
+    for (std::uint8_t revealed = 0; revealed < state.color_count; ++revealed) {
         if (revealed == action.color) continue;
         for (std::uint16_t run = 1; run <= hidden; ++run) {
             State successor = state;
@@ -327,11 +359,13 @@ std::vector<Outcome> outcomes(const State& state, const SourceAction& action,
             outcome.revealed_color = revealed;
             outcome.run_length = run;
             successor = canonicalize(successor);
-            // Even a transition that reaches z=2 must correspond to a
-            // balanced hidden completion.  Only after this feasibility check
-            // may the strict z>=2 finishing theorem turn it into a goal edge.
+            // Even a transition that reaches the finishing threshold must
+            // correspond to a balanced hidden completion.  Only after this
+            // feasibility check may the z+empty>=colors theorem turn it into
+            // a goal edge.
             if (!algebraically_consistent(successor, height)) continue;
-            outcome.goal = successor.exhausted >= kTargetExhausted;
+            outcome.goal = successor.exhausted >=
+                           target_exhausted(successor.color_count);
             outcome.successor = std::move(successor);
 
             const auto duplicate = std::find_if(
@@ -371,19 +405,19 @@ void insert_state(Enumeration& enumeration, State state,
     enumeration.index.emplace(std::move(state), id);
 }
 
-void enumerate_f(const std::array<std::uint8_t, kColors>& counts,
-                 const std::array<std::uint32_t, kColors>& g,
+void enumerate_f(const std::array<std::uint8_t, kMaxColors>& counts,
+                 const std::array<std::uint32_t, kMaxColors>& g,
                  std::size_t color, std::int32_t remaining,
                  State& state, Enumeration& enumeration,
                  const Options& options) {
-    if (color == kColors) {
+    if (color == options.colors) {
         if (remaining == 0) insert_state(enumeration, state, options);
         return;
     }
 
     std::int32_t min_after = 0;
     std::int32_t max_after = 0;
-    for (std::size_t next = color + 1; next < kColors; ++next) {
+    for (std::size_t next = color + 1; next < options.colors; ++next) {
         min_after += counts[next];
         max_after += static_cast<std::int32_t>(options.height);
     }
@@ -402,12 +436,12 @@ void enumerate_source_multisets(std::uint8_t exhausted,
                                 std::size_t depth, std::uint32_t first_type,
                                 State& state, Enumeration& enumeration,
                                 const Options& options) {
-    const auto wanted = kOriginalColumns - exhausted;
+    const auto wanted = static_cast<std::size_t>(options.colors - exhausted);
     if (depth == wanted) {
-        std::array<std::uint8_t, kColors> counts{};
-        std::array<std::uint32_t, kColors> g{};
+        std::array<std::uint8_t, kMaxColors> counts{};
+        std::array<std::uint32_t, kMaxColors> g{};
         std::uint32_t sum_s = 0;
-        for (std::size_t color = 0; color < kColors; ++color) {
+        for (std::size_t color = 0; color < options.colors; ++color) {
             const auto& bucket = state.colors[color];
             counts[color] = bucket.count;
             g[color] = bucket_exposed(bucket);
@@ -420,7 +454,7 @@ void enumerate_source_multisets(std::uint8_t exhausted,
         return;
     }
 
-    const auto type_count = static_cast<std::uint32_t>(kColors) *
+    const auto type_count = static_cast<std::uint32_t>(options.colors) *
                             (options.height - 1U);
     for (auto type = first_type; type < type_count; ++type) {
         const auto color = static_cast<std::uint8_t>(
@@ -442,9 +476,11 @@ Enumeration enumerate_states(const Options& options) {
         std::min<std::uint64_t>(options.max_states, 1'000'000));
     enumeration.states.reserve(reserve);
     enumeration.index.reserve(reserve);
-    for (std::uint8_t exhausted = 0; exhausted < kTargetExhausted;
+    for (std::uint8_t exhausted = 0;
+         exhausted < target_exhausted(options.colors);
          ++exhausted) {
         State state;
+        state.color_count = options.colors;
         state.exhausted = exhausted;
         enumerate_source_multisets(exhausted, 0, 0, state, enumeration,
                                    options);
@@ -546,18 +582,23 @@ bool visible_source_less(const VisibleSource& lhs, const VisibleSource& rhs) {
 }
 
 struct VisibleState {
+    std::uint8_t color_count = 0;
     std::uint8_t exhausted = 0;
     std::uint8_t count = 0;
-    std::array<std::int32_t, kColors> deficit{};
-    std::array<VisibleSource, kOriginalColumns> sources{};
+    std::array<std::int32_t, kMaxColors> deficit{};
+    std::array<VisibleSource, kMaxOriginalColumns> sources{};
 
     friend bool operator==(const VisibleState& lhs, const VisibleState& rhs) {
-        return lhs.exhausted == rhs.exhausted && lhs.count == rhs.count &&
+        return lhs.color_count == rhs.color_count &&
+               lhs.exhausted == rhs.exhausted && lhs.count == rhs.count &&
                lhs.deficit == rhs.deficit && lhs.sources == rhs.sources;
     }
 };
 
 bool visible_state_less(const VisibleState& lhs, const VisibleState& rhs) {
+    if (lhs.color_count != rhs.color_count) {
+        return lhs.color_count < rhs.color_count;
+    }
     if (lhs.exhausted != rhs.exhausted) return lhs.exhausted < rhs.exhausted;
     if (lhs.count != rhs.count) return lhs.count < rhs.count;
     if (lhs.deficit != rhs.deficit) return lhs.deficit < rhs.deficit;
@@ -569,7 +610,8 @@ bool visible_state_less(const VisibleState& lhs, const VisibleState& rhs) {
 
 struct VisibleStateHash {
     std::size_t operator()(const VisibleState& state) const noexcept {
-        std::size_t seed = hash_combine(state.exhausted, state.count);
+        std::size_t seed = hash_combine(state.color_count, state.exhausted);
+        seed = hash_combine(seed, state.count);
         for (const auto value : state.deficit) {
             seed = hash_combine(seed, std::hash<std::int32_t>{}(value));
         }
@@ -583,25 +625,33 @@ struct VisibleStateHash {
     }
 };
 
-const std::vector<std::array<std::uint8_t, kColors>>& color_permutations() {
+using ColorPermutation = std::array<std::uint8_t, kMaxColors>;
+
+const std::vector<ColorPermutation>& color_permutations(
+    std::uint8_t color_count) {
     static const auto permutations = [] {
-        std::vector<std::array<std::uint8_t, kColors>> result;
-        std::array<std::uint8_t, kColors> value{0, 1, 2, 3};
-        do {
-            result.push_back(value);
-        } while (std::next_permutation(value.begin(), value.end()));
+        std::array<std::vector<ColorPermutation>, kMaxColors + 1> result;
+        for (std::uint8_t colors = 3; colors <= kMaxColors; ++colors) {
+            ColorPermutation value{0, 1, 2, 3};
+            do {
+                result[colors].push_back(value);
+            } while (std::next_permutation(value.begin(),
+                                           value.begin() + colors));
+        }
         return result;
     }();
-    return permutations;
+    return permutations[color_count];
 }
 
 VisibleState canonicalize_visible(const VisibleState& state) {
     std::optional<VisibleState> best;
-    for (const auto& permutation : color_permutations()) {
+    for (const auto& permutation : color_permutations(state.color_count)) {
         VisibleState candidate;
+        candidate.color_count = state.color_count;
         candidate.exhausted = state.exhausted;
         candidate.count = state.count;
-        for (std::size_t old_color = 0; old_color < kColors; ++old_color) {
+        for (std::size_t old_color = 0; old_color < state.color_count;
+             ++old_color) {
             candidate.deficit[permutation[old_color]] =
                 state.deficit[old_color];
         }
@@ -624,8 +674,9 @@ VisibleState canonicalize_visible(const VisibleState& state) {
 
 State project_visible(const VisibleState& visible) {
     State projected;
+    projected.color_count = visible.color_count;
     projected.exhausted = visible.exhausted;
-    for (std::size_t color = 0; color < kColors; ++color) {
+    for (std::size_t color = 0; color < visible.color_count; ++color) {
         projected.colors[color].deficit = visible.deficit[color];
     }
     for (std::size_t index = 0; index < visible.count; ++index) {
@@ -633,25 +684,31 @@ State project_visible(const VisibleState& visible) {
         auto& bucket = projected.colors[source.top];
         bucket.exposed[bucket.count++] = source.exposed;
     }
-    for (auto& bucket : projected.colors) normalize_bucket(bucket);
+    for (std::size_t color = 0; color < visible.color_count; ++color) {
+        normalize_bucket(projected.colors[color]);
+    }
     return projected;
 }
 
 bool visible_consistent(const VisibleState& visible, std::uint32_t height) {
-    if (visible.count + visible.exhausted != kOriginalColumns) return false;
+    if (visible.color_count < 3 || visible.color_count > kMaxColors) {
+        return false;
+    }
+    if (visible.count + visible.exhausted != visible.color_count) return false;
     const auto projected = project_visible(visible);
     if (!algebraically_consistent(projected, height)) return false;
 
     const auto f = exposed_counts(projected);
-    std::array<std::int32_t, kColors> residual{};
-    for (std::size_t color = 0; color < kColors; ++color) {
+    std::array<std::int32_t, kMaxColors> residual{};
+    for (std::size_t color = 0; color < visible.color_count; ++color) {
         residual[color] = static_cast<std::int32_t>(height) - f[color];
     }
-    std::array<std::uint8_t, kColors> residual_forbidden{};
+    std::array<std::uint8_t, kMaxColors> residual_forbidden{};
     std::int32_t residual_slots = 0;
     for (std::size_t index = 0; index < visible.count; ++index) {
         const auto& source = visible.sources[index];
-        if (source.top >= kColors || source.next >= kColors ||
+        if (source.top >= visible.color_count ||
+            source.next >= visible.color_count ||
             source.top == source.next || source.exposed == 0 ||
             source.exposed >= height || source.next_run == 0 ||
             source.next_run > height - source.exposed) {
@@ -664,10 +721,11 @@ bool visible_consistent(const VisibleState& visible, std::uint32_t height) {
         if (below != 0) ++residual_forbidden[source.next];
     }
     const auto residual_items = std::accumulate(residual.begin(),
-                                                residual.end(),
+                                                residual.begin() +
+                                                    visible.color_count,
                                                 std::int32_t{0});
     if (residual_items != residual_slots) return false;
-    for (std::size_t color = 0; color < kColors; ++color) {
+    for (std::size_t color = 0; color < visible.color_count; ++color) {
         if (static_cast<std::int32_t>(residual_forbidden[color]) >
             residual_items - residual[color]) {
             return false;
@@ -698,7 +756,7 @@ std::vector<VisibleAction> visible_actions(const VisibleState& state) {
         const auto& source = state.sources[index];
         if (index != 0 && source == state.sources[index - 1]) continue;
         std::uint8_t demand = 0;
-        for (std::size_t color = 0; color < kColors; ++color) {
+        for (std::size_t color = 0; color < state.color_count; ++color) {
             auto value = state.deficit[color];
             if (color == source.top) value += source.exposed;
             if (value > 0) ++demand;
@@ -738,7 +796,8 @@ std::vector<VisibleOutcome> visible_outcomes(const VisibleState& state,
         if (!visible_consistent(base, height)) {
             throw std::logic_error("committed exhausting run became infeasible");
         }
-        return {{base.exhausted >= kTargetExhausted, 0, 0, base}};
+        return {{base.exhausted >= target_exhausted(base.color_count),
+                 0, 0, base}};
     }
 
     base.deficit[action.source.top] += action.source.exposed;
@@ -750,7 +809,7 @@ std::vector<VisibleOutcome> visible_outcomes(const VisibleState& state,
 
     std::vector<VisibleOutcome> result;
     const auto remaining = height - replacement.exposed;
-    for (std::uint8_t next = 0; next < kColors; ++next) {
+    for (std::uint8_t next = 0; next < state.color_count; ++next) {
         if (next == replacement.top) continue;
         replacement.next = next;
         for (std::uint16_t run = 1; run <= remaining; ++run) {
@@ -783,8 +842,8 @@ struct VisibleInitials {
 
 void enumerate_visible_assignments(
     VisibleState& state, std::size_t index,
-    const std::array<std::int32_t, kColors>& remaining,
-    std::array<std::int32_t, kColors>& used,
+    const std::array<std::int32_t, kMaxColors>& remaining,
+    std::array<std::int32_t, kMaxColors>& used,
     VisibleInitials& initials, const Options& options) {
     if (index == state.count) {
         ++initials.candidates;
@@ -808,7 +867,7 @@ void enumerate_visible_assignments(
 
     auto& source = state.sources[index];
     const auto hidden = options.height - source.exposed;
-    for (std::uint8_t next = 0; next < kColors; ++next) {
+    for (std::uint8_t next = 0; next < state.color_count; ++next) {
         if (next == source.top) continue;
         source.next = next;
         for (std::uint16_t run = 1; run <= hidden; ++run) {
@@ -833,8 +892,9 @@ VisibleInitials enumerate_visible_initials(const Enumeration& enumeration,
     for (const auto& projected : enumeration.states) {
         if (!is_initial_projection(projected, options.height)) continue;
         VisibleState state;
+        state.color_count = options.colors;
         state.exhausted = projected.exhausted;
-        for (std::size_t color = 0; color < kColors; ++color) {
+        for (std::size_t color = 0; color < options.colors; ++color) {
             state.deficit[color] = projected.colors[color].deficit;
             for (std::size_t source = 0;
                  source < projected.colors[color].count; ++source) {
@@ -844,12 +904,12 @@ VisibleInitials enumerate_visible_initials(const Enumeration& enumeration,
             }
         }
         const auto f = exposed_counts(projected);
-        std::array<std::int32_t, kColors> remaining{};
-        for (std::size_t color = 0; color < kColors; ++color) {
+        std::array<std::int32_t, kMaxColors> remaining{};
+        for (std::size_t color = 0; color < options.colors; ++color) {
             remaining[color] = static_cast<std::int32_t>(options.height) -
                                f[color];
         }
-        std::array<std::int32_t, kColors> used{};
+        std::array<std::int32_t, kMaxColors> used{};
         enumerate_visible_assignments(state, 0, remaining, used, initials,
                                       options);
     }
@@ -931,7 +991,7 @@ std::string visible_state_text(const VisibleState& state,
     output << "z=" << static_cast<unsigned>(state.exhausted)
            << " A=" << (kEmptyColumns + state.exhausted)
            << " remaining=" << visible_remaining(state, height) << " d=[";
-    for (std::size_t color = 0; color < kColors; ++color) {
+    for (std::size_t color = 0; color < state.color_count; ++color) {
         if (color != 0) output << ',';
         output << state.deficit[color];
     }
@@ -992,7 +1052,9 @@ void write_visible_results(const Options& options,
     std::ofstream witness(options.witness);
     if (!witness) throw std::runtime_error("cannot write next-run witness");
     witness << "FINITE TOP-TWO-RUN ONLINE COUNTER-GAME\nheight="
-            << options.height << "\n\nWARNING\n"
+            << options.height << "\ncolors="
+            << static_cast<unsigned>(options.colors)
+            << "\nempty_columns=" << kEmptyColumns << "\n\nWARNING\n"
             << "A losing observation refutes only an online controller that "
                "sees Q plus every current next run. The environment commits "
                "those runs before source choice and chooses only the newly "
@@ -1042,6 +1104,15 @@ void write_visible_results(const Options& options,
               "next-run game\",\n"
            << "  \"observation\": \"next-run\",\n"
            << "  \"height\": " << options.height << ",\n"
+           << "  \"colors\": " << static_cast<unsigned>(options.colors)
+           << ",\n"
+           << "  \"original_columns\": "
+           << static_cast<unsigned>(options.colors) << ",\n"
+           << "  \"empty_columns\": " << kEmptyColumns << ",\n"
+           << "  \"target_exhausted\": "
+           << static_cast<unsigned>(target_exhausted(options.colors))
+           << ",\n"
+           << "  \"nonterminal_state_space_only\": true,\n"
            << "  \"max_states\": " << options.max_states << ",\n"
            << "  \"max_candidates\": " << options.max_candidates << ",\n"
            << "  \"base_consistent_q_states\": "
@@ -1076,7 +1147,9 @@ void write_visible_results(const Options& options,
               "observation policy, not universal Water Sort solvability.\"\n"
            << "}\n";
 
-    std::cout << "height=" << options.height << " observation=next-run"
+    std::cout << "height=" << options.height
+              << " colors=" << static_cast<unsigned>(options.colors)
+              << " observation=next-run"
               << " initial=" << initials.states.size()
               << " initial_winning=" << winning_initial
               << " reachable=" << search.nodes.size()
@@ -1091,7 +1164,7 @@ std::string state_text(const State& state, std::uint32_t height) {
            << " A=" << (kEmptyColumns + state.exhausted)
            << " remaining=" << remaining_items(state, height) << '\n';
     const auto f = exposed_counts(state);
-    for (std::size_t color = 0; color < kColors; ++color) {
+    for (std::size_t color = 0; color < state.color_count; ++color) {
         const auto& bucket = state.colors[color];
         output << "  c" << color << ": d=" << bucket.deficit
                << " F=" << f[color] << " active_s=[";
@@ -1152,7 +1225,8 @@ void write_witness(const Options& options, const Enumeration& enumeration,
     ensure_parent(options.witness);
     std::ofstream output(options.witness);
     if (!output) throw std::runtime_error("cannot write witness file");
-    output << "FINITE FOUR-COLOR / TWO-EMPTY ONLINE COUNTER-GAME\n"
+    output << "FINITE " << static_cast<unsigned>(options.colors)
+           << "-COLOR / TWO-EMPTY ONLINE COUNTER-GAME\n"
            << "height=" << options.height << "\n\n"
            << "WARNING\n"
            << "A losing Q refutes only a strategy that observes Q and learns a "
@@ -1170,7 +1244,7 @@ void write_witness(const Options& options, const Enumeration& enumeration,
         const auto actions = legal_actions(state);
         if (actions.empty()) {
             output << "  obstruction: no legal source (every N_i > A)\n";
-            for (std::size_t color = 0; color < kColors; ++color) {
+            for (std::size_t color = 0; color < options.colors; ++color) {
                 const auto& bucket = state.colors[color];
                 for (std::size_t index = 0; index < bucket.count; ++index) {
                     const auto demand = source_demand(state,
@@ -1250,17 +1324,22 @@ void write_report(const Options& options, const Enumeration& enumeration,
            << "  \"observation\": \"" << observation_name(options.observation)
            << "\",\n"
            << "  \"height\": " << options.height << ",\n"
-           << "  \"colors\": " << kColors << ",\n"
-           << "  \"original_columns\": " << kOriginalColumns << ",\n"
+           << "  \"colors\": " << static_cast<unsigned>(options.colors)
+           << ",\n"
+           << "  \"original_columns\": "
+           << static_cast<unsigned>(options.colors) << ",\n"
            << "  \"empty_columns\": " << kEmptyColumns << ",\n"
-           << "  \"target_exhausted\": " << kTargetExhausted << ",\n"
+           << "  \"target_exhausted\": "
+           << static_cast<unsigned>(target_exhausted(options.colors))
+           << ",\n"
+           << "  \"nonterminal_state_space_only\": true,\n"
            << "  \"max_states\": " << options.max_states << ",\n"
            << "  \"max_candidates\": " << options.max_candidates << ",\n"
            << "  \"enumeration_complete\": true,\n"
            << "  \"symmetry\": \"unlabeled original columns and color "
               "permutations\",\n"
            << "  \"constraints\": [\n"
-           << "    \"active count plus z equals four\",\n"
+           << "    \"active count plus z equals the color count\",\n"
            << "    \"1 <= s_i < h for every active source\",\n"
            << "    \"F_c = d_c + sum[a_i=c] s_i lies between the active "
               "top count and h\",\n"
@@ -1302,6 +1381,7 @@ void write_report(const Options& options, const Enumeration& enumeration,
            << "}\n";
 
     std::cout << "height=" << options.height
+              << " colors=" << static_cast<unsigned>(options.colors)
               << " states=" << enumeration.states.size()
               << " winning=" << winning
               << " losing=" << (enumeration.states.size() - winning)
@@ -1324,6 +1404,12 @@ Options parse_options(int argc, char** argv) {
         };
         if (argument == "--height") {
             options.height = static_cast<std::uint32_t>(std::stoul(value()));
+        } else if (argument == "--colors") {
+            const auto parsed = std::stoul(value());
+            if (parsed > std::numeric_limits<std::uint8_t>::max()) {
+                throw std::invalid_argument("--colors must be 3 or 4");
+            }
+            options.colors = static_cast<std::uint8_t>(parsed);
         } else if (argument == "--report") {
             options.report = value();
         } else if (argument == "--witness") {
@@ -1345,7 +1431,8 @@ Options parse_options(int argc, char** argv) {
             options.self_test = true;
         } else if (argument == "--help") {
             std::cout
-                << "usage: water-counter-game --height H [--report FILE] "
+                << "usage: water-counter-game --height H [--colors 3|4] "
+                   "[--report FILE] "
                    "[--witness FILE] [--max-states N] "
                    "[--max-candidates N] [--observation q|next-run] "
                    "[--self-test]\n";
@@ -1360,16 +1447,21 @@ Options parse_options(int argc, char** argv) {
     if (options.height > std::numeric_limits<std::uint16_t>::max()) {
         throw std::invalid_argument("height exceeds the counter encoding");
     }
+    if (options.colors < 3 || options.colors > 4) {
+        throw std::invalid_argument("--colors must be 3 or 4");
+    }
     if (options.max_states == 0 || options.max_candidates == 0) {
         throw std::invalid_argument("enumeration limits must be positive");
     }
     return options;
 }
 
-void self_test(std::uint32_t height) {
+void self_test(const Options& options) {
+    const auto height = options.height;
     State state;
+    state.color_count = options.colors;
     state.exhausted = 0;
-    for (std::size_t color = 0; color < kColors; ++color) {
+    for (std::size_t color = 0; color < options.colors; ++color) {
         state.colors[color].count = 1;
         state.colors[color].exposed[0] = 1;
     }
@@ -1392,9 +1484,11 @@ void self_test(std::uint32_t height) {
     }
 
     VisibleState visible;
-    for (std::uint8_t color = 0; color < kColors; ++color) {
+    visible.color_count = options.colors;
+    for (std::uint8_t color = 0; color < options.colors; ++color) {
         visible.sources[visible.count++] = {
-            color, 1, static_cast<std::uint8_t>((color + 1U) % kColors),
+            color, 1,
+            static_cast<std::uint8_t>((color + 1U) % options.colors),
             static_cast<std::uint16_t>(height - 1U)};
     }
     visible = canonicalize_visible(visible);
@@ -1407,11 +1501,14 @@ void self_test(std::uint32_t height) {
     }
     const auto first_outcomes = visible_outcomes(visible, first_actions.front(),
                                                  height);
-    if (first_outcomes.size() != 1 || first_outcomes.front().goal ||
+    const auto first_is_goal = target_exhausted(options.colors) == 1;
+    if (first_outcomes.size() != 1 ||
+        first_outcomes.front().goal != first_is_goal ||
         first_outcomes.front().successor.exhausted != 1) {
         throw std::logic_error(
-            "first exhausted source was incorrectly treated as the z=2 goal");
+            "first exhausted source has incorrect goal semantics");
     }
+    if (first_is_goal) return;
     const auto second_actions = visible_actions(first_outcomes.front().successor);
     if (second_actions.empty()) {
         throw std::logic_error("self-test z=1 visible state has no action");
@@ -1419,8 +1516,9 @@ void self_test(std::uint32_t height) {
     const auto second_outcomes = visible_outcomes(
         first_outcomes.front().successor, second_actions.front(), height);
     if (second_outcomes.size() != 1 || !second_outcomes.front().goal ||
-        second_outcomes.front().successor.exhausted != kTargetExhausted) {
-        throw std::logic_error("second exhausted source did not reach z=2");
+        second_outcomes.front().successor.exhausted !=
+            target_exhausted(options.colors)) {
+        throw std::logic_error("second exhausted source did not reach goal");
     }
 }
 
@@ -1429,7 +1527,7 @@ void self_test(std::uint32_t height) {
 int main(int argc, char** argv) {
     try {
         const auto options = parse_options(argc, argv);
-        if (options.self_test) self_test(options.height);
+        if (options.self_test) self_test(options);
         auto enumeration = enumerate_states(options);
         if (options.observation == ObservationMode::next_run) {
             const auto initials = enumerate_visible_initials(enumeration,

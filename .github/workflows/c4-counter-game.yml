@@ -1,5 +1,5 @@
-name: Solve bounded c4 k2 counter game
-run-name: Counter game h${{ inputs.height || '6' }} ${{ inputs.observation || 'next-run' }}
+name: Solve bounded k2 counter game
+run-name: Counter game c${{ inputs.colors || '4' }} h${{ inputs.height || '6' }} ${{ inputs.observation || 'next-run' }}
 
 on:
   # Bootstrap this research workflow before the draft PR reaches main.
@@ -8,6 +8,12 @@ on:
     paths: [.github/workflows/c4-counter-game.yml]
   workflow_dispatch:
     inputs:
+      colors:
+        description: Colors and initially full columns
+        required: true
+        default: "4"
+        type: choice
+        options: ["3", "4"]
       height:
         description: Fixed stack height
         required: true
@@ -34,7 +40,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: c4-k2-counter-game-${{ github.ref }}
+  group: c${{ inputs.colors || '4' }}-k2-counter-game-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
@@ -42,6 +48,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 180
     env:
+      COLORS: ${{ inputs.colors || '4' }}
       HEIGHT: ${{ inputs.height || '6' }}
       OBSERVATION: ${{ inputs.observation || 'next-run' }}
       MAX_STATES: ${{ inputs.max_states || '50000000' }}
@@ -58,6 +65,7 @@ jobs:
           mkdir -p out
           set -o pipefail
           build/water-counter-game \
+            --colors "$COLORS" \
             --height "$HEIGHT" \
             --observation "$OBSERVATION" \
             --max-states "$MAX_STATES" \
@@ -81,7 +89,7 @@ jobs:
       - uses: actions/upload-artifact@v6
         if: always()
         with:
-          name: counter-game-h${{ inputs.height || '6' }}-${{ inputs.observation || 'next-run' }}
+          name: counter-game-c${{ inputs.colors || '4' }}-h${{ inputs.height || '6' }}-${{ inputs.observation || 'next-run' }}
           path: out/
           if-no-files-found: error
           retention-days: 30

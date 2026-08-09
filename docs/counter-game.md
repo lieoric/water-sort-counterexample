@@ -1,7 +1,9 @@
-# Bounded counter game for four colors and two empty columns
+# Bounded counter game for three or four colors and two empty columns
 
 `apps/counter_game.cpp` is a finite-height research tool for the
-four-color/two-empty macro-level question.  It supports two observation games:
+balanced three-or-four-color/two-empty macro-level question.  The number of
+initially full original columns equals the number of colors.  It supports two
+observation games:
 
 - `q`: the controller observes only a counter state `Q`, chooses a source, and
   only then is told the next hidden color run in that source;
@@ -16,8 +18,9 @@ completion.
 
 ## State and legal actions
 
-There are four balanced colors, four initially full original columns, two
-initially empty columns, and capacity `h`.  At an idle tight checkpoint let
+There are `c` balanced colors, `c` initially full original columns, two
+initially empty columns, and capacity `h`, where `c` is 3 or 4.  At an idle
+tight checkpoint let
 
 ```text
 Q = (z, (a_i,s_i) for active original columns i, (d_c) for colors c)
@@ -37,9 +40,17 @@ The number of required monochrome hosts after choosing source `i` is
 N_i = sum_c 1[d_c + 1[c=a_i] s_i > 0].
 ```
 
-The source is legal exactly when `N_i <= 2+z`.  Once `z>=2`, the right-hand
-side is at least four, so every remaining source is legal and the state is a
-goal of this bounded game.
+The source is legal exactly when `N_i <= 2+z`.  Since `N_i<=c`, every
+remaining source is automatically legal once
+
+```text
+z >= c-2.
+```
+
+This is the goal of the bounded game: `z>=1` for three colors and `z>=2` for
+four colors.  In particular, carrying the old `z>=2` threshold into a
+three-color run would postpone an already-proved finishing condition and
+would model an artificially stronger game.
 
 ## Exact algebraic consistency test
 
@@ -52,7 +63,7 @@ F_c = d_c + sum_{i:a_i=c} s_i
 and its remaining hidden count as `R_c=h-F_c`.  The enumerator retains exactly
 the projected states satisfying all of the following constraints:
 
-1. `number of active columns + z = 4`;
+1. `number of active columns + z = c`;
 2. every active `s_i` satisfies `1 <= s_i < h`;
 3. `count(i:a_i=c) <= F_c <= h` for every color;
 4. `sum_c d_c = z*h` and therefore
@@ -60,22 +71,22 @@ the projected states satisfying all of the following constraints:
 5. every active hidden suffix is nonempty and its first color differs from
    `a_i`.
 
-The last condition is checked by the four Hall inequalities
+The last condition is checked by the `c` Hall inequalities
 
 ```text
 count(i:a_i=c) <= sum_{x != c} R_x.
 ```
 
-They are sufficient here.  A set of columns sharing forbidden color `c` can
-use every remaining color except `c`; a set containing two different
-forbidden colors has all four colors in the union of its allowed sets.  After
+They are sufficient here.  A set of columns sharing one forbidden color can
+use every remaining color except that color; a set containing two different
+forbidden colors has all colors in the union of its allowed sets.  After
 one legal first hidden item is assigned to every active column, all residual
 items can occupy arbitrary residual positions.  The analogous exposed-word
 condition needs only one mandatory `a_i` item per active column.
 
 Colors and original-column labels are quotiented out.  A canonical state is a
-sorted list of four color buckets, each containing `d_c` and the multiset of
-the `s_i` values topped by that color.
+sorted list of `c` color buckets, each containing `d_c` and the multiset of the
+`s_i` values topped by that color.
 
 ## Environment transition
 
@@ -121,6 +132,7 @@ The source is standalone C++17.  Once wired into the build as
 ```text
 water-counter-game \
   --height 7 \
+  --colors 4 \
   --report out/counter-h7/report.json \
   --witness out/counter-h7/losing.txt \
   --self-test
@@ -132,19 +144,23 @@ report records all limits, state counts, initial projections, wins and losses.
 The text witness prints the smallest losing algebraic state and, when one
 exists, the smallest losing initial projection.
 
+`--colors` accepts 3 or 4 and defaults to 4, so existing four-color commands
+remain compatible.
+
 To run the stronger observation in which all current next runs are committed
 before source choice:
 
 ```text
 water-counter-game \
   --height 5 \
+  --colors 4 \
   --observation next-run \
   --report out/counter-next-h5/report.json \
   --witness out/counter-next-h5/losing.txt \
   --self-test
 ```
 
-## Current local finite-height results
+## Four-color finite-height results
 
 The following complete runs used the default limits and the implementation in
 this repository:
@@ -205,17 +221,53 @@ the `q`-only mode.  A complete optimized `h=5` run takes about 75 seconds and
 The complete [`h=6` GitHub Actions run](https://github.com/lieoric/water-sort-counterexample/actions/runs/31336494403)
 took about six minutes including build and tests.
 
-These are complete finite-height results only.  They neither prove that the
-same controller wins at `h=7` and beyond nor establish an induction that
-collapses arbitrary run lengths to the tested state space. A separately
-certified Water instance is already NO at `h=8`.
+## Three-color finite-height results
+
+With three colors the finishing threshold is one exhausted original column.
+The parameterized executable gives the following complete `q` results:
+
+The tables count nonterminal states only (`z<c-2`).  An input already at the
+threshold is winning by the finishing theorem and does not enter the search.
+
+| `h` | consistent `Q` | winning `Q` | losing `Q` | initial `Q` | losing initial `Q` |
+|---:|---:|---:|---:|---:|---:|
+| 2 | 2 | 2 | 0 | 2 | 0 |
+| 3 | 38 | 38 | 0 | 9 | 0 |
+| 4 | 220 | 220 | 0 | 24 | 0 |
+| 5 | 798 | 798 | 0 | 48 | 0 |
+| 6 | 2,200 | 2,200 | 0 | 87 | 0 |
+| 7 | 5,088 | 5,087 | 1 | 139 | 0 |
+
+The first losing algebraically consistent `q` state occurs at `h=7`, but it
+is not an initial projection.  The stronger committed-next-run game likewise
+has no losing initial observation through `h=7`:
+
+| `h` | initial next-run observations | reachable observations | losing reachable | losing initial |
+|---:|---:|---:|---:|---:|
+| 2 | 2 | 2 | 0 | 0 |
+| 3 | 44 | 137 | 0 | 0 |
+| 4 | 392 | 2,314 | 0 | 0 |
+| 5 | 1,945 | 18,848 | 0 | 0 |
+| 6 | 6,866 | 98,258 | 0 | 0 |
+| 7 | 19,362 | 384,203 | 33 | 0 |
+
+Thus local traps begin to exist at `h=7`, yet the retrograde strategy avoids
+all of them from every initial next-run observation.  These are exact
+finite-height game results, not an induction over arbitrary height.
+
+The four-color table contains complete finite-height results only.  It neither
+proves that the same controller wins at `h=7` and beyond nor establishes an
+induction that collapses arbitrary run lengths to the tested state space. A
+separately certified four-color Water instance is already NO at `h=8`.
 
 ## What this settles, and what it does not
 
 For each reported `q` height, the game enumeration and retrograde result are
-complete under the stated algebraic projection.  In particular, `h<=4` admits
-a universal online `Q` policy and `h=5` does not.  For `next-run`, the reachable
-closure from every initial observation is complete through `h=6`.
+complete under the stated algebraic projection.  For four colors, `h<=4`
+admits a universal online `Q` policy and `h=5` does not; the `next-run`
+reachable closure is complete through `h=6`.  For three colors, all initial
+states are winning in both games through `h=7`, although each abstraction has
+non-initial losing states at `h=7`.
 
 This rules out using bare `Q=(z,a_i,s_i,d_c)` as the state of an
 arbitrary-height online proof.  It does not rule out:
@@ -223,10 +275,10 @@ arbitrary-height online proof.  It does not rule out:
 - a strategy that inspects the known hidden suffixes of the input instance;
 - a stronger finite abstraction that remembers additional run information;
 - a global existence proof whose source choices depend on the whole instance;
-- the behavior at the unresolved fixed height `h=7`.
+- the four-color behavior at the unresolved fixed height `h=7`.
 
-Likewise, the `next-run` successes through `h=6` prove those finite heights,
-not an infinite-height theorem.  A losing online game would still
+Likewise, the four-color `next-run` successes through `h=6` prove those finite
+heights, not an infinite-height theorem.  A losing online game would still
 not automatically be a Water Sort NO: the environment is allowed to choose a
 new deeper run after each action, whereas an ordinary solver receives one
 fully fixed instance and may inspect all of its suffixes before moving.

@@ -215,6 +215,18 @@ if(BUILD_TESTING)
             --self-test
             --report ${CMAKE_CURRENT_BINARY_DIR}/test-counter-next/report.json
             --witness ${CMAKE_CURRENT_BINARY_DIR}/test-counter-next/witness.txt)
+    function(add_counter_game_regression NAME CASE_NAME)
+        add_test(NAME ${NAME}
+            COMMAND ${CMAKE_COMMAND}
+                -DPROGRAM=$<TARGET_FILE:water-counter-game>
+                -DCASE=${CASE_NAME}
+                -DOUT=${CMAKE_CURRENT_BINARY_DIR}/${NAME}-output
+                -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/check_counter_game.cmake)
+    endfunction()
+    add_counter_game_regression(water-counter-game-c4-q-h2 c4-q-h2)
+    add_counter_game_regression(water-counter-game-c4-next-h2 c4-next-h2)
+    add_counter_game_regression(water-counter-game-c3-q-h2 c3-q-h2)
+    add_counter_game_regression(water-counter-game-c3-next-h3 c3-next-h3)
     function(add_universe_regression NAME HEIGHT COLORS EMPTY CLASSES UNSOLVABLE)
         add_test(NAME ${NAME}
             COMMAND water-universe
