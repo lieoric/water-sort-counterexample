@@ -3,7 +3,9 @@
 #include <algorithm>
 #include <functional>
 #include <limits>
+#include <sstream>
 #include <stdexcept>
+#include <tuple>
 
 namespace water_sort {
 namespace {
@@ -21,6 +23,24 @@ std::uint32_t ceil_div(std::uint32_t numerator, std::uint32_t denominator) {
 }
 
 } // namespace
+
+bool DeadlockSignature::operator<(const DeadlockSignature& other) const {
+    return std::tie(available_buffers, deficient_color_count, hosted_color_count,
+                    need_by_source) <
+           std::tie(other.available_buffers, other.deficient_color_count,
+                    other.hosted_color_count, other.need_by_source);
+}
+
+std::string DeadlockSignature::compact() const {
+    std::ostringstream output;
+    output << "a" << available_buffers << "-d" << deficient_color_count
+           << "-h" << hosted_color_count << "-n";
+    for (std::size_t i = 0; i < need_by_source.size(); ++i) {
+        if (i != 0) output << ',';
+        output << need_by_source[i];
+    }
+    return output.str();
+}
 
 BorderOracle::BorderOracle(Instance instance) : instance_(std::move(instance)) {
     instance_.validate();
@@ -99,9 +119,16 @@ bool BorderOracle::can_remove(const std::vector<std::uint32_t>& ranks,
                               const std::vector<std::uint32_t>& f,
                               const std::vector<std::uint32_t>& g,
                               std::uint32_t monochrome_bins) const {
+    return buffers_needed(ranks, column, f, g) <= monochrome_bins;
+}
+
+std::uint32_t BorderOracle::buffers_needed(const std::vector<std::uint32_t>& ranks,
+                                           std::size_t column,
+                                           const std::vector<std::uint32_t>& f,
+                                           const std::vector<std::uint32_t>& g) const {
     const auto rank = ranks[column];
     if (rank == 0) {
-        return false;
+        return std::numeric_limits<std::uint32_t>::max();
     }
     const auto border = data_[column].borders[rank];
     const auto source_top_color = instance_.columns[column][border];
@@ -115,7 +142,7 @@ bool BorderOracle::can_remove(const std::vector<std::uint32_t>& ranks,
             needed += ceil_div(f[color] - usable, instance_.height);
         }
     }
-    return needed <= monochrome_bins;
+    return needed;
 }
 
 OracleResult BorderOracle::solve() const {
@@ -219,6 +246,76 @@ CountResult BorderOracle::count_solutions(std::uint64_t cap) const {
     };
 
     result.solutions = visit(initial_state_);
+    return result;
+}
+
+AnalysisResult BorderOracle::analyze() const {
+    AnalysisResult result;
+    std::vector<std::uint8_t> seen((state_count_ + 7U) / 8U, 0);
+    std::vector<std::uint32_t> queue;
+    queue.reserve(std::min<std::uint32_t>(state_count_, 1U << 20U));
+    set_bit(seen, initial_state_);
+    queue.push_back(initial_state_);
+
+    std::vector<std::uint32_t> ranks(instance_.columns.size());
+    std::vector<std::uint32_t> f(instance_.color_count);
+    std::vector<std::uint32_t> g(instance_.color_count);
+    std::uint32_t initial_rank_sum = 0;
+    for (const auto rank : radix_) initial_rank_sum += rank - 1U;
+    auto min_depth = std::numeric_limits<std::uint32_t>::max();
+
+    for (std::size_t head = 0; head < queue.size(); ++head) {
+        const auto state = queue[head];
+        ++result.reachable_states;
+        if (state == 0) {
+            result.solvable = true;
+            continue;
+        }
+
+        decode(state, ranks);
+        std::uint32_t rank_sum = 0;
+        for (const auto rank : ranks) rank_sum += rank;
+        const auto depth = initial_rank_sum - rank_sum;
+        std::uint32_t monochrome_bins = 0;
+        totals(ranks, f, g, monochrome_bins);
+
+        bool has_successor = false;
+        std::vector<std::uint32_t> needs;
+        needs.reserve(ranks.size());
+        for (std::size_t column = 0; column < ranks.size(); ++column) {
+            if (ranks[column] == 0) continue;
+            ++result.transitions_tested;
+            const auto needed = buffers_needed(ranks, column, f, g);
+            needs.push_back(needed);
+            if (needed > monochrome_bins) continue;
+            has_successor = true;
+            const auto next = state - multiplier_[column];
+            if (!bit_is_set(seen, next)) {
+                set_bit(seen, next);
+                queue.push_back(next);
+            }
+        }
+
+        if (!has_successor) {
+            ++result.terminal_states;
+            min_depth = std::min(min_depth, depth);
+            result.max_terminal_depth = std::max(result.max_terminal_depth, depth);
+            DeadlockSignature signature;
+            signature.available_buffers = monochrome_bins;
+            signature.deficient_color_count = 0;
+            signature.hosted_color_count = 0;
+            for (std::size_t color = 0; color < f.size(); ++color) {
+                if (f[color] > g[color]) ++signature.deficient_color_count;
+                if (g[color] > 0) ++signature.hosted_color_count;
+            }
+            std::sort(needs.begin(), needs.end());
+            signature.need_by_source = std::move(needs);
+            ++result.signatures[signature];
+        }
+    }
+
+    result.min_terminal_depth =
+        min_depth == std::numeric_limits<std::uint32_t>::max() ? 0 : min_depth;
     return result;
 }
 

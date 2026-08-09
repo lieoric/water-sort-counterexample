@@ -1,0 +1,9 @@
+# Columns are written bottom-to-top.
+height=16
+colors=5
+empty=2
+column=4140421213243221
+column=1241041123043300
+column=4141201332043002
+column=3322134140003021
+column=2410314432403032

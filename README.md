@@ -23,7 +23,10 @@ columns, which are unlabeled.
 - `water-oracle`: an exact top-border dynamic program based on Ito et al.
 - `water-verify`: an independently coded verifier for compact NO certificates.
 - `water-hunter`: a seeded, sharded mutation/hill-climbing search over valid
-  5x16 arrangements.
+  arrangements, with configurable height, colors, and empty columns.
+- `water-neighborhood`: exact, symmetry-deduplicated scanning of the committed
+  seeds and all one-swap neighbors.
+- `water-minimize`: a NO-preserving local search for simpler counterexamples.
 - A literal full-state Water BFS with forced bulk moves and locked completed
   columns, used only as a small-instance reference implementation.
 - Exhaustive cross-checks over 1,796 small initial arrangements, plus the
@@ -105,6 +108,10 @@ legal successor of every marked state. Its worst-case payload for 5x16 is only
   --out out/shard-0
 ```
 
+The default search remains 5x16 with two empty columns. Use `--height`,
+`--colors`, and `--empty` to explore other parameter points, including the
+open three-empty-column search at `--empty 3`.
+
 Mutations swap two differently colored cells, so every candidate always has
 exactly 16 units of each color. The heuristic minimizes the number of legal
 border-removal sequences, capped for speed. A count of zero is exact; all
@@ -113,6 +120,52 @@ positive capped counts are only search fitness.
 The `Hunt counterexample` GitHub Actions workflow starts eight independent
 shards and uploads each shard's best instance and report. If a shard finds a
 NO instance, it also uploads the instance and its certificate.
+
+## Counterexample experiments
+
+Five independently certified, pairwise inequivalent 5x16 counterexamples are
+committed under `counterexamples/`. Their common terminal signature is:
+
+```text
+available buffers = 2
+deficient colors  = 2
+hosted colors     = 3
+buffers needed after any source choice = 3,3,3,3,3
+```
+
+Analyze one directly:
+
+```bash
+./build/water-oracle \
+  --input counterexamples/ce-000.txt \
+  --analyze
+```
+
+Scan the seeds and every one-swap neighbor with three empty columns:
+
+```bash
+./build/water-neighborhood \
+  --seed-dir counterexamples \
+  --empty 3 \
+  --shard 0 --shards 16 \
+  --out out/threshold-0
+```
+
+Search for a simpler representative while preserving exact unsolvability:
+
+```bash
+./build/water-minimize \
+  --input counterexamples/ce-000.txt \
+  --seconds 900 \
+  --out out/minimized
+```
+
+The `Scan known counterexample family` workflow distributes the exact
+one-swap scan over 16 shards and merges the symmetry classes. The `Minimize
+verified counterexamples` workflow runs four independent restarts from each
+committed seed. A scan that finds no three-empty-column counterexample is
+evidence about this known family only; it is not a proof that every 5x16
+instance is solvable with three empty columns.
 
 ## Important caveats
 

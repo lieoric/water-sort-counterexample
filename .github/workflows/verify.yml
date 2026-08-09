@@ -35,8 +35,16 @@ jobs:
           MANUAL_INSTANCE: ${{ inputs.instance }}
           MANUAL_CERTIFICATE: ${{ inputs.certificate }}
         run: |
-          instance="${MANUAL_INSTANCE:-counterexamples/counterexample.txt}"
-          certificate="${MANUAL_CERTIFICATE:-counterexamples/counterexample.wscert}"
-          test -f "$instance"
-          test -f "$certificate"
-          ./build/water-verify --input "$instance" --certificate "$certificate"
+          if test -n "$MANUAL_INSTANCE"; then
+            test -f "$MANUAL_INSTANCE"
+            test -f "$MANUAL_CERTIFICATE"
+            ./build/water-verify \
+              --input "$MANUAL_INSTANCE" \
+              --certificate "$MANUAL_CERTIFICATE"
+          else
+            for instance in counterexamples/ce-*.txt; do
+              certificate="${instance%.txt}.wscert"
+              test -f "$certificate"
+              ./build/water-verify --input "$instance" --certificate "$certificate"
+            done
+          fi

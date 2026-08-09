@@ -10,7 +10,8 @@
 namespace {
 
 void usage() {
-    std::cerr << "Usage: water-oracle --input INSTANCE [--certificate FILE] [--count CAP]\n";
+    std::cerr << "Usage: water-oracle --input INSTANCE [--certificate FILE] [--count CAP] "
+                 "[--analyze] [--empty-override K]\n";
 }
 
 } // namespace
@@ -19,6 +20,8 @@ int main(int argc, char** argv) try {
     std::filesystem::path input_path;
     std::filesystem::path certificate_path;
     std::uint64_t count_cap = 0;
+    std::uint32_t empty_override = 0;
+    bool analyze = false;
     for (int i = 1; i < argc; ++i) {
         const std::string argument = argv[i];
         if (argument == "--input" && i + 1 < argc) {
@@ -27,6 +30,10 @@ int main(int argc, char** argv) try {
             certificate_path = argv[++i];
         } else if (argument == "--count" && i + 1 < argc) {
             count_cap = std::stoull(argv[++i]);
+        } else if (argument == "--empty-override" && i + 1 < argc) {
+            empty_override = static_cast<std::uint32_t>(std::stoul(argv[++i]));
+        } else if (argument == "--analyze") {
+            analyze = true;
         } else if (argument == "--help") {
             usage();
             return 0;
@@ -40,7 +47,8 @@ int main(int argc, char** argv) try {
         return 2;
     }
 
-    const auto instance = water_sort::read_instance(input_path);
+    auto instance = water_sort::read_instance(input_path);
+    if (empty_override != 0) instance.empty_columns = empty_override;
     const water_sort::BorderOracle oracle(instance);
     if (count_cap != 0) {
         const auto count = oracle.count_solutions(count_cap);
@@ -64,6 +72,15 @@ int main(int argc, char** argv) try {
         water_sort::write_no_certificate(instance, oracle.state_count(),
                                          result.reachable_bits, certificate_path);
         std::cout << "certificate=" << certificate_path.string() << '\n';
+    }
+    if (analyze) {
+        const auto analysis = oracle.analyze();
+        std::cout << "terminal_states=" << analysis.terminal_states << '\n';
+        std::cout << "terminal_depth=" << analysis.min_terminal_depth << '-'
+                  << analysis.max_terminal_depth << '\n';
+        for (const auto& [signature, count] : analysis.signatures) {
+            std::cout << "signature=" << signature.compact() << " count=" << count << '\n';
+        }
     }
     return 0;
 } catch (const std::exception& error) {

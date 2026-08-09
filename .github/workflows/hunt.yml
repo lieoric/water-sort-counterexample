@@ -13,6 +13,21 @@ on:
         required: true
         default: "10000"
         type: string
+      height:
+        description: Items per full column
+        required: true
+        default: "16"
+        type: string
+      colors:
+        description: Colors and initially full columns
+        required: true
+        default: "5"
+        type: string
+      empty_columns:
+        description: Initially empty columns
+        required: true
+        default: "2"
+        type: string
 
 permissions:
   contents: read
@@ -22,7 +37,26 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Build and validate once
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+          cmake --build build --parallel 2
+          ctest --test-dir build --output-on-failure
+          mkdir tools
+          cp build/water-hunter build/water-verify tools/
+          tar -czf water-tools.tar.gz tools
+      - uses: actions/upload-artifact@v6
+        with:
+          name: hunt-tools
+          path: water-tools.tar.gz
+          retention-days: 7
+
   hunt:
+    needs: prepare
     name: Shard ${{ matrix.shard }} of 8
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -33,25 +67,26 @@ jobs:
         shard: [0, 1, 2, 3, 4, 5, 6, 7]
     steps:
       - uses: actions/checkout@v5
-      - name: Build release binaries
-        run: |
-          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
-          cmake --build build --parallel 2
-      - name: Validate oracle before hunting
-        run: ctest --test-dir build --output-on-failure
+      - uses: actions/download-artifact@v6
+        with:
+          name: hunt-tools
+      - run: tar -xzf water-tools.tar.gz
       - name: Hunt
         run: |
-          ./build/water-hunter \
+          tools/water-hunter \
             --seed "${{ github.run_id }}" \
             --shard "${{ matrix.shard }}" \
             --shards 8 \
             --seconds "${{ inputs.seconds }}" \
             --solution-cap "${{ inputs.solution_cap }}" \
+            --height "${{ inputs.height }}" \
+            --colors "${{ inputs.colors }}" \
+            --empty "${{ inputs.empty_columns }}" \
             --out "out/shard-${{ matrix.shard }}"
       - name: Verify a discovered counterexample
         if: ${{ hashFiles(format('out/shard-{0}/counterexample.txt', matrix.shard)) != '' }}
         run: |
-          ./build/water-verify \
+          tools/water-verify \
             --input "out/shard-${{ matrix.shard }}/counterexample.txt" \
             --certificate "out/shard-${{ matrix.shard }}/counterexample.wscert"
       - name: Add shard report to summary
