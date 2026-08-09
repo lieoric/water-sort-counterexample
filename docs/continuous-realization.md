@@ -85,6 +85,20 @@ every macro step. It verifies conserved color totals, protected original
 prefixes, the exact top-border table, tight monochrome counts, maximal pour
 quantities, and the locked-source rule before accepting a trace.
 
+## Exact finite-catalog replay
+
+GitHub Actions run
+[`31334595589`](https://github.com/lieoric/water-sort-counterexample/actions/runs/31334595589)
+replayed both candidate controllers on all 4,301 representatives in the
+committed catalog. All **8,602/8,602** continuous runs reached the fully sorted
+goal. They realized 284,154 border removals with 389,773 forced maximal bulk
+moves; the checker reported zero construction gaps and zero attempts to source
+a locked full stack. The longest individual trace used 184 bulk moves.
+
+This result removes the finite experiment's former physical-realization gap.
+It remains finite evidence about the two controllers, not a quantification over
+all heights or all balanced initial instances.
+
 ## Remaining universal question
 
 Continuous realization removes the physical gap between a legal border path

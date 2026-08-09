@@ -300,6 +300,14 @@ It then removes every remaining border after the two-exhausted-column frontier
 and verifies the full sorted goal. See [the continuous realization
 argument](docs/continuous-realization.md).
 
+The exact 4,301-instance catalog was replayed from its real physical initial
+states under both compressed controllers: **8,602/8,602** runs reached the
+fully sorted goal after 284,154 border removals and 389,773 forced maximal
+bulk moves, with zero construction gaps and zero locked-source violations.
+This validates physical realization on the finite catalog; it is not the
+still-missing arbitrary-height macro-policy proof. See
+[`31334595589`](https://github.com/lieoric/water-sort-counterexample/actions/runs/31334595589).
+
 For an unsolvable instance, write and independently check a certificate:
 
 ```bash
