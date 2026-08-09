@@ -329,7 +329,19 @@ NO instances exist exactly when h >= 5.
 ```
 
 Color monotonicity also turns the complete `(c,h,k)=(5,4,2)` YES result into
-the safe rectangle `c<=5`, `h<=4`, `k=2`.
+the safe rectangle `c<=5`, `h<=4`, `k=2`. A second complete scan at
+`(c,h,k)=(4,5,2)` examined 72,345,636 orderly representations and classified
+all 20,434,876 exact symmetry classes as YES. See
+[GitHub Actions run 31322659737](https://github.com/lieoric/water-sort-counterexample/actions/runs/31322659737).
+
+Thus the current two-empty safe region includes
+
+```text
+(c <= 5 and h <= 4) or (c <= 4 and h <= 5).
+```
+
+Together with a certified NO witness at `(5,5,2)`, these two safe rectangles
+prove that `(5,5)` is a minimal NO-existence parameter pair for `k=2`.
 
 The height-4 run examined 113,291,534 orderly representations before exact
 symmetry canonicalization. See

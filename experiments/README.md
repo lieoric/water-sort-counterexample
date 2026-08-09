@@ -67,3 +67,9 @@ full columns, and two empty columns is exactly 5. The height-4 result is from
 The balanced bottom-layer monotonicity theorem in the main README extends any
 one of these witnesses to every height greater than 5. Thus NO instances exist
 for every `h >= 5`, while the exhaustive scans prove that none exist below 5.
+
+The complete `(c,h,k)=(4,5,2)` scan classified all 20,434,876 symmetry
+classes as YES. Combined with the complete `(5,4,2)` YES scan and the height-5
+witnesses here, this proves that `(c,h)=(5,5)` is a minimal two-empty-column
+NO-existence parameter pair. The `(4,5,2)` result is from
+[GitHub Actions run 31322659737](https://github.com/lieoric/water-sort-counterexample/actions/runs/31322659737).
