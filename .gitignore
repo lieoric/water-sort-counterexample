@@ -5,6 +5,7 @@
 /outputs/
 *.wscert
 !counterexamples/*.wscert
+!experiments/*.wscert
 *.exe
 *.o
 *.obj

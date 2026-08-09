@@ -17,6 +17,8 @@ on:
     paths:
       - "counterexamples/*.txt"
       - "counterexamples/*.wscert"
+      - "experiments/*.txt"
+      - "experiments/*.wscert"
 
 permissions:
   contents: read
@@ -43,6 +45,11 @@ jobs:
               --certificate "$MANUAL_CERTIFICATE"
           else
             for instance in counterexamples/ce-*.txt; do
+              certificate="${instance%.txt}.wscert"
+              test -f "$certificate"
+              ./build/water-verify --input "$instance" --certificate "$certificate"
+            done
+            for instance in experiments/*.txt; do
               certificate="${instance%.txt}.wscert"
               test -f "$certificate"
               ./build/water-verify --input "$instance" --certificate "$certificate"
