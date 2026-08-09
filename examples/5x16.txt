@@ -1,0 +1,9 @@
+# A valid 5 colors x 16 example. Columns are bottom-to-top.
+height=16
+colors=5
+empty=2
+column=0123401234012340
+column=1234012340123401
+column=2340123401234012
+column=3401234012340123
+column=4012340123401234

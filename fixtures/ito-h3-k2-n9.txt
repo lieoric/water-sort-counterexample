@@ -1,0 +1,13 @@
+# Ito et al., Figure 10(a). Columns are bottom-to-top.
+height=3
+colors=9
+empty=2
+column=630
+column=730
+column=830
+column=641
+column=741
+column=841
+column=652
+column=752
+column=852

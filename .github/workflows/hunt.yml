@@ -1,0 +1,72 @@
+name: Hunt counterexample
+
+on:
+  workflow_dispatch:
+    inputs:
+      seconds:
+        description: Seconds per shard
+        required: true
+        default: "900"
+        type: string
+      solution_cap:
+        description: Border-sequence count cap used as fitness
+        required: true
+        default: "10000"
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: water-sort-hunt-${{ github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  hunt:
+    name: Shard ${{ matrix.shard }} of 8
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      max-parallel: 8
+      matrix:
+        shard: [0, 1, 2, 3, 4, 5, 6, 7]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build release binaries
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+          cmake --build build --parallel 2
+      - name: Validate oracle before hunting
+        run: ctest --test-dir build --output-on-failure
+      - name: Hunt
+        run: |
+          ./build/water-hunter \
+            --seed "${{ github.run_id }}" \
+            --shard "${{ matrix.shard }}" \
+            --shards 8 \
+            --seconds "${{ inputs.seconds }}" \
+            --solution-cap "${{ inputs.solution_cap }}" \
+            --out "out/shard-${{ matrix.shard }}"
+      - name: Verify a discovered counterexample
+        if: ${{ hashFiles(format('out/shard-{0}/counterexample.txt', matrix.shard)) != '' }}
+        run: |
+          ./build/water-verify \
+            --input "out/shard-${{ matrix.shard }}/counterexample.txt" \
+            --certificate "out/shard-${{ matrix.shard }}/counterexample.wscert"
+      - name: Add shard report to summary
+        if: always()
+        run: |
+          if test -f "out/shard-${{ matrix.shard }}/report.json"; then
+            echo '```json' >> "$GITHUB_STEP_SUMMARY"
+            cat "out/shard-${{ matrix.shard }}/report.json" >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Upload shard artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hunt-shard-${{ matrix.shard }}
+          path: out/shard-${{ matrix.shard }}/
+          if-no-files-found: error
+          retention-days: 30

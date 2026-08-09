@@ -1,0 +1,9 @@
+/build/
+/build-*/
+/out/
+/work/
+/outputs/
+*.wscert
+*.exe
+*.o
+*.obj

@@ -1,0 +1,42 @@
+name: Verify counterexample
+
+on:
+  workflow_dispatch:
+    inputs:
+      instance:
+        description: Repository path to the instance
+        required: true
+        default: counterexamples/counterexample.txt
+        type: string
+      certificate:
+        description: Repository path to the .wscert file
+        required: true
+        default: counterexamples/counterexample.wscert
+        type: string
+  push:
+    paths:
+      - "counterexamples/*.txt"
+      - "counterexamples/*.wscert"
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build verifier
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+          cmake --build build --parallel 2
+      - name: Verify
+        env:
+          MANUAL_INSTANCE: ${{ inputs.instance }}
+          MANUAL_CERTIFICATE: ${{ inputs.certificate }}
+        run: |
+          instance="${MANUAL_INSTANCE:-counterexamples/counterexample.txt}"
+          certificate="${MANUAL_CERTIFICATE:-counterexamples/counterexample.wscert}"
+          test -f "$instance"
+          test -f "$certificate"
+          ./build/water-verify --input "$instance" --certificate "$certificate"
