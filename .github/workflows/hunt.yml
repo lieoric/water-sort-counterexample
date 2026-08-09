@@ -32,7 +32,7 @@ jobs:
       matrix:
         shard: [0, 1, 2, 3, 4, 5, 6, 7]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Build release binaries
         run: |
           cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
@@ -64,7 +64,7 @@ jobs:
           fi
       - name: Upload shard artifacts
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: hunt-shard-${{ matrix.shard }}
           path: out/shard-${{ matrix.shard }}/
