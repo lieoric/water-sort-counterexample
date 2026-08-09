@@ -50,6 +50,9 @@ target_link_libraries(water-minimize PRIVATE water_sort)
 add_executable(water-skeleton apps/skeleton.cpp)
 target_link_libraries(water-skeleton PRIVATE water_sort)
 
+add_executable(water-universe apps/universe.cpp)
+target_link_libraries(water-universe PRIVATE water_sort)
+
 include(CTest)
 if(BUILD_TESTING)
     add_executable(water-sort-tests tests/test_main.cpp)
@@ -79,4 +82,14 @@ if(BUILD_TESTING)
             --frontier-limit 1
             --certificate-limit 0
             --out ${CMAKE_CURRENT_BINARY_DIR}/test-family-output)
+    add_test(NAME water-universe-height-two
+        COMMAND water-universe
+            --height 2
+            --colors 5
+            --empty 2
+            --candidate-limit 1000
+            --certificate-limit 0
+            --expect-classes 20
+            --expect-unsolvable 0
+            --out ${CMAKE_CURRENT_BINARY_DIR}/test-universe-output)
 endif()

@@ -31,6 +31,8 @@ columns, which are unlabeled.
 - `water-skeleton`: constrained enumeration of positive run lengths for a
   fixed run-color skeleton, preserving both every column total and every color
   total.
+- `water-universe`: complete low-height enumeration modulo all color-name and
+  full-column permutations, followed by exact oracle classification.
 - A literal full-state Water BFS with forced bulk moves and locked completed
   columns, used only as a small-instance reference implementation.
 - Exhaustive cross-checks over 1,796 small initial arrangements, plus the
@@ -198,6 +200,32 @@ Changing `--height` keeps the run-color order but solves new integer length
 constraints, making it possible to test whether the obstruction persists at
 other tube heights.
 
+### Complete low-height search
+
+To study the first height at which two empty columns can fail, keep five
+colors, five initially full columns, and two empty columns fixed, and scan
+heights upward:
+
+```bash
+./build/water-universe \
+  --height 3 \
+  --colors 5 \
+  --empty 2 \
+  --out out/universe-3
+```
+
+Each color occurs exactly `height` times. The enumerator uses a
+restricted-growth color order and sorted columns, then performs an exact
+canonicality check. It writes one oracle result per equivalence class under
+color renaming and full-column permutation. An unlimited run has
+`stopped_early=false` in `report.json`; this flag must be checked before a
+zero-counterexample result is treated as exhaustive.
+
+The complete scans currently establish that height 1 has one solvable class,
+height 2 has 20 solvable classes, and height 3 has 12,304 solvable classes. The
+known height-8 examples therefore give an upper bound on the global minimum,
+not yet a proof that height 8 is minimal.
+
 For the committed 20-run skeleton, exhaustive enumeration finds no NO length
 assignment at heights 5, 6, or 7, but finds exactly three NO symmetry classes
 among 9,648 classes at height 8. Those three instances and their certificates
@@ -213,6 +241,10 @@ distributes run-length assignments over 16 shards. A scan that finds no
 three-empty-column counterexample is
 evidence about this known family only; it is not a proof that every 5x16
 instance is solvable with three empty columns.
+
+`Scan complete low-height universe` distributes the orderly search tree over
+16 shards. Its merge job fails if any shard reaches its candidate limit, so a
+successful merged artifact is a complete classification at that height.
 
 ## Important caveats
 
