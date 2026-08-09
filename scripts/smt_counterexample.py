@@ -96,11 +96,14 @@ def main() -> int:
     for column in range(columns - 1):
         solver.add(lex_leq(item[column], item[column + 1]))
 
-    # Partition the symmetry-reduced covering by the first column's base-c
-    # integer code.  These congruence classes are disjoint and exhaustive.
-    first_column_code = Sum(*(item[0][position] * (colors ** position)
-                              for position in range(height)))
-    solver.add(first_column_code % options.shards == options.shard)
+    # item[0][0] is fixed to zero above, so omit that constant base-c digit.
+    # Keeping it would make most power-of-c congruence shards empty.  The
+    # suffix code still partitions the covering into disjoint exhaustive
+    # congruence classes while using every practical shard.
+    first_column_suffix_code = Sum(*(
+        item[0][position] * (colors ** (position - 1))
+        for position in range(1, height)))
+    solver.add(first_column_suffix_code % options.shards == options.shard)
 
     boundary = [[True] + [item[column][position - 1] !=
                            item[column][position]

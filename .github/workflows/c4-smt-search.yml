@@ -14,7 +14,7 @@ on:
         default: "6"
         type: string
       shards:
-        description: Complete congruence partition
+        description: Complete first-column-suffix congruence partition
         required: true
         default: "16"
         type: choice

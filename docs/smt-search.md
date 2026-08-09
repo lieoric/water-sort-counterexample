@@ -16,7 +16,8 @@ two-empty case the frontier is two exhausted original columns.
 Global color relabeling fixes the first sorted column's bottom item to color
 zero; full columns are sorted lexicographically.  This symmetry-reduced
 covering is partitioned into disjoint shards by the base-`c` code of the first
-column.
+column after omitting its already-fixed bottom zero.  Omitting that constant
+digit prevents power-of-`c` shard counts from creating mostly empty jobs.
 Consequently, all shards together cover the fixed-height universe even though
 they solve independently.
 
