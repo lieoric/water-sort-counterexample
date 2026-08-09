@@ -7,6 +7,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <limits>
 #include <numeric>
 #include <random>
 #include <sstream>
@@ -29,6 +30,8 @@ struct Options {
     std::uint32_t repair_passes = 128;
     std::uint32_t max_instances = 0;
     std::uint64_t seed = 1;
+    std::string heuristic;
+    std::string default_heuristic;
 };
 
 struct Observation {
@@ -177,6 +180,18 @@ Observation canonical_observation(const water_sort::PolicyStateView& state,
     return best;
 }
 
+std::uint64_t transform_column_mask(
+    std::uint64_t original_mask,
+    const std::vector<std::size_t>& original_columns) {
+    std::uint64_t transformed = 0;
+    for (std::size_t position = 0; position < original_columns.size(); ++position) {
+        if ((original_mask & (std::uint64_t{1} << original_columns[position])) != 0) {
+            transformed |= std::uint64_t{1} << position;
+        }
+    }
+    return transformed;
+}
+
 std::uint8_t choose_action(std::uint64_t mask, std::mt19937_64& rng) {
     if (mask == 0) throw std::runtime_error("cannot choose from an empty action mask");
     std::vector<std::uint8_t> actions;
@@ -207,11 +222,16 @@ Options parse_options(int argc, char** argv) {
         else if (argument == "--repair-passes") options.repair_passes = std::stoul(value());
         else if (argument == "--max-instances") options.max_instances = std::stoul(value());
         else if (argument == "--seed") options.seed = std::stoull(value());
+        else if (argument == "--heuristic") options.heuristic = value();
+        else if (argument == "--default-heuristic") options.default_heuristic = value();
         else if (argument == "--out") options.out = value();
         else if (argument == "--help") {
             std::cout << "water-policy-control --catalog FILE [--conflicts FILE] "
                          "[--depth D --goal-exhausted N] [--restarts N] "
-                         "[--repair-passes N] [--max-instances N] [--seed N] [--out DIR]\n";
+                         "[--repair-passes N] [--max-instances N] [--seed N] "
+                         "[--heuristic NAME] "
+                         "[--default-heuristic NAME] "
+                         "[--out DIR]\n";
             std::exit(0);
         } else {
             throw std::runtime_error("unknown argument: " + argument);
@@ -221,6 +241,18 @@ Options parse_options(int argc, char** argv) {
         options.goal_exhausted_columns == 0 || options.restarts == 0 ||
         options.repair_passes == 0) {
         throw std::runtime_error("invalid controlled-policy options");
+    }
+    const std::unordered_set<std::string> heuristics{
+        "", "first", "last", "finish", "expose", "min-need", "max-need",
+        "deficient-first", "deficient-finish"};
+    if (heuristics.count(options.heuristic) == 0) {
+        throw std::runtime_error("unknown direct heuristic: " + options.heuristic);
+    }
+    if (heuristics.count(options.default_heuristic) == 0) {
+        throw std::runtime_error("unknown default heuristic: " + options.default_heuristic);
+    }
+    if (!options.heuristic.empty() && !options.default_heuristic.empty()) {
+        throw std::runtime_error("direct and default heuristics are mutually exclusive");
     }
     return options;
 }
@@ -257,6 +289,8 @@ void write_report(const Options& options,
 
     std::ofstream report(options.out / "report.json");
     report << "{\n"
+           << "  \"mode\": \"controlled-synthesis\",\n"
+           << "  \"default_heuristic\": \"" << options.default_heuristic << "\",\n"
            << "  \"success\": " << (success ? "true" : "false") << ",\n"
            << "  \"instances\": " << model_count << ",\n"
            << "  \"visible_boundaries\": " << options.depth << ",\n"
@@ -269,11 +303,16 @@ void write_report(const Options& options,
            << "  \"verified_replay_states\": " << verified_replay_states << ",\n"
            << "  \"completed_instances\": " << completed_instances << ",\n"
            << "  \"policy_rules\": " << choices.size() << ",\n"
+           << "  \"observed_signatures\": " << final_domains.size() << ",\n"
            << "  \"catalog_global_conflicts\": " << catalog_conflicts << ",\n"
            << "  \"reached_global_conflicts\": " << reached_conflicts.size() << ",\n"
            << "  \"last_failure\": \"" << last_failure << "\"\n"
            << "}\n";
 }
+
+std::uint8_t choose_direct_heuristic(const std::string& heuristic,
+                                     const Observation& observation,
+                                     const water_sort::PolicyStateView& state);
 
 std::uint64_t verify_controller(
     std::vector<Model>& models,
@@ -286,23 +325,177 @@ std::uint64_t verify_controller(
         auto state = model.table.initial_state;
         while (model.table.goal[state] == 0) {
             ++replay_states;
+            const auto view = model.oracle.policy_state(state, options.depth);
             const auto observation = canonical_observation(
-                model.oracle.policy_state(state, options.depth),
+                view,
                 model.table.safe_columns[state], colors, empty_columns);
             const auto choice = choices.find(observation.signature);
-            if (choice == choices.end()) {
+            std::uint8_t action = 0;
+            if (choice != choices.end()) {
+                action = choice->second;
+            } else if (!options.default_heuristic.empty()) {
+                auto legal_observation = observation;
+                legal_observation.safe_columns = transform_column_mask(
+                    model.table.legal_columns[state], observation.original_columns);
+                action = choose_direct_heuristic(
+                    options.default_heuristic, legal_observation, view);
+            } else {
                 throw std::runtime_error("controller replay is missing a rule");
             }
-            const auto bit = std::uint64_t{1} << choice->second;
+            if (action == std::numeric_limits<std::uint8_t>::max()) {
+                throw std::runtime_error("controller replay reached a direct deadlock");
+            }
+            const auto bit = std::uint64_t{1} << action;
             if ((observation.safe_columns & bit) == 0 ||
-                choice->second >= observation.original_columns.size()) {
+                action >= observation.original_columns.size()) {
                 throw std::runtime_error("controller replay selected an unsafe action");
             }
             state = model.oracle.policy_successor(
-                state, observation.original_columns[choice->second]);
+                state, observation.original_columns[action]);
         }
     }
     return replay_states;
+}
+
+std::uint8_t choose_direct_heuristic(const std::string& heuristic,
+                                     const Observation& observation,
+                                     const water_sort::PolicyStateView& state) {
+    if (observation.safe_columns == 0) return std::numeric_limits<std::uint8_t>::max();
+    std::uint8_t selected = 0;
+    std::tuple<int, int, int, int> best_score;
+    bool have_best = false;
+    bool deficient = false;
+    for (std::size_t color = 0; color < state.f.size(); ++color) {
+        deficient = deficient || state.f[color] > state.g[color];
+    }
+    for (std::uint8_t position = 0;
+         position < observation.original_columns.size(); ++position) {
+        if ((observation.safe_columns & (std::uint64_t{1} << position)) == 0) continue;
+        const auto& column = state.columns[observation.original_columns[position]];
+        const auto truncated = column.truncated ? 1 : 0;
+        const auto visible = static_cast<int>(column.visible_runs.size());
+        const auto need = static_cast<int>(std::min<std::uint32_t>(
+            column.buffers_needed, static_cast<std::uint32_t>(1000)));
+        std::tuple<int, int, int, int> score;
+        if (heuristic == "first") score = {position, 0, 0, 0};
+        else if (heuristic == "last") score = {-position, 0, 0, 0};
+        else if (heuristic == "finish") score = {truncated, visible, need, position};
+        else if (heuristic == "expose") score = {-truncated, need, visible, position};
+        else if (heuristic == "min-need") score = {need, truncated, visible, position};
+        else if (heuristic == "max-need") score = {-need, truncated, visible, position};
+        else if (heuristic == "deficient-first") {
+            score = state.available_buffers == 2 && deficient
+                ? std::tuple<int, int, int, int>{position, 0, 0, 0}
+                : std::tuple<int, int, int, int>{-position, 0, 0, 0};
+        } else if (heuristic == "deficient-finish") {
+            score = state.available_buffers == 2 && deficient
+                ? std::tuple<int, int, int, int>{truncated, visible, need, position}
+                : std::tuple<int, int, int, int>{-position, 0, 0, 0};
+        }
+        else throw std::runtime_error("direct heuristic is empty");
+        if (!have_best || score < best_score) {
+            best_score = score;
+            selected = position;
+            have_best = true;
+        }
+    }
+    return selected;
+}
+
+void evaluate_direct_heuristic(
+    const Options& options,
+    std::vector<Model>& models,
+    const std::unordered_set<std::string>& global_conflicts,
+    std::uint32_t colors,
+    std::uint32_t empty_columns) {
+    std::unordered_map<std::string, std::uint8_t> rules;
+    std::unordered_set<std::string> reached_conflicts;
+    std::vector<std::tuple<std::size_t, std::string, std::string>> failures;
+    std::uint64_t traversed_states = 0;
+    std::size_t completed = 0;
+    std::size_t unsafe_failures = 0;
+    std::size_t deadlock_failures = 0;
+
+    for (std::size_t model_index = 0; model_index < models.size(); ++model_index) {
+        auto& model = models[model_index];
+        auto state_id = model.table.initial_state;
+        bool failed = false;
+        while (model.table.goal[state_id] == 0) {
+            ++traversed_states;
+            const auto state = model.oracle.policy_state(state_id, options.depth);
+            const auto observation = canonical_observation(
+                state, model.table.legal_columns[state_id], colors, empty_columns);
+            if (global_conflicts.count(observation.signature) != 0) {
+                reached_conflicts.insert(observation.signature);
+            }
+            const auto action = choose_direct_heuristic(
+                options.heuristic, observation, state);
+            if (action == std::numeric_limits<std::uint8_t>::max()) {
+                ++deadlock_failures;
+                if (failures.size() < 20) {
+                    failures.emplace_back(model_index, "deadlock", observation.signature);
+                }
+                failed = true;
+                break;
+            }
+            const auto [rule, inserted] = rules.emplace(observation.signature, action);
+            if (!inserted && rule->second != action) {
+                throw std::runtime_error("direct heuristic is not signature-deterministic");
+            }
+            const auto original_column = observation.original_columns[action];
+            if ((model.table.safe_columns[state_id] &
+                 (std::uint64_t{1} << original_column)) == 0) {
+                ++unsafe_failures;
+                if (failures.size() < 20) {
+                    failures.emplace_back(model_index, "unsafe", observation.signature);
+                }
+                failed = true;
+                break;
+            }
+            state_id = model.oracle.policy_successor(state_id, original_column);
+        }
+        if (!failed) ++completed;
+    }
+
+    std::filesystem::create_directories(options.out);
+    std::vector<std::string> signatures;
+    signatures.reserve(rules.size());
+    for (const auto& [signature, action] : rules) {
+        static_cast<void>(action);
+        signatures.push_back(signature);
+    }
+    std::sort(signatures.begin(), signatures.end());
+    std::ofstream policy(options.out / "policy.tsv");
+    policy << "action\tsignature\n";
+    for (const auto& signature : signatures) {
+        policy << static_cast<std::uint32_t>(rules.at(signature)) << '\t'
+               << signature << '\n';
+    }
+    std::ofstream failure_table(options.out / "failures.tsv");
+    failure_table << "model\treason\tsignature\n";
+    for (const auto& [model, reason, signature] : failures) {
+        failure_table << model << '\t' << reason << '\t' << signature << '\n';
+    }
+    const auto success = completed == models.size();
+    std::ofstream report(options.out / "report.json");
+    report << "{\n"
+           << "  \"mode\": \"direct-heuristic\",\n"
+           << "  \"heuristic\": \"" << options.heuristic << "\",\n"
+           << "  \"success\": " << (success ? "true" : "false") << ",\n"
+           << "  \"instances\": " << models.size() << ",\n"
+           << "  \"completed_instances\": " << completed << ",\n"
+           << "  \"unsafe_failures\": " << unsafe_failures << ",\n"
+           << "  \"deadlock_failures\": " << deadlock_failures << ",\n"
+           << "  \"traversed_states\": " << traversed_states << ",\n"
+           << "  \"observed_rules\": " << rules.size() << ",\n"
+           << "  \"reached_global_conflicts\": " << reached_conflicts.size() << "\n"
+           << "}\n";
+    std::cout << "heuristic=" << options.heuristic
+              << " success=" << (success ? 1 : 0)
+              << " completed=" << completed << '/' << models.size()
+              << " unsafe=" << unsafe_failures
+              << " deadlock=" << deadlock_failures
+              << " rules=" << rules.size() << '\n';
 }
 
 } // namespace
@@ -328,6 +521,12 @@ int main(int argc, char** argv) try {
         }
     }
 
+    if (!options.heuristic.empty()) {
+        evaluate_direct_heuristic(options, models, global_conflicts,
+                                  colors, empty_columns);
+        return 0;
+    }
+
     std::mt19937_64 rng(options.seed);
     std::vector<std::size_t> order(models.size());
     std::iota(order.begin(), order.end(), 0U);
@@ -339,6 +538,7 @@ int main(int argc, char** argv) try {
     std::uint32_t final_restart = options.restarts;
     std::uint32_t final_repairs = 0;
     std::size_t best_completed = 0;
+    bool have_best = false;
     bool found = false;
 
     for (std::uint32_t restart = 0; restart < options.restarts && !found; ++restart) {
@@ -380,16 +580,44 @@ int main(int argc, char** argv) try {
                     }
 
                     auto choice = choices.find(observation.signature);
+                    std::uint8_t action = 0;
                     if (choice == choices.end()) {
-                        choice = choices.emplace(observation.signature,
-                                                 choose_action(domain->second, rng)).first;
+                        if (options.default_heuristic.empty()) {
+                            choice = choices.emplace(observation.signature,
+                                                     choose_action(domain->second, rng)).first;
+                            action = choice->second;
+                        } else {
+                            auto legal_observation = observation;
+                            legal_observation.safe_columns = transform_column_mask(
+                                model.table.legal_columns[state],
+                                observation.original_columns);
+                            const auto view = model.oracle.policy_state(state, options.depth);
+                            const auto fallback = choose_direct_heuristic(
+                                options.default_heuristic, legal_observation, view);
+                            if (fallback != std::numeric_limits<std::uint8_t>::max() &&
+                                (domain->second &
+                                 (std::uint64_t{1} << fallback)) != 0) {
+                                action = fallback;
+                            } else {
+                                choice = choices.emplace(
+                                    observation.signature,
+                                    choose_action(domain->second, rng)).first;
+                                action = choice->second;
+                                if (!inserted) {
+                                    changed = true;
+                                    break;
+                                }
+                            }
+                        }
                     } else if ((domain->second & (std::uint64_t{1} << choice->second)) == 0) {
                         choice->second = choose_action(domain->second, rng);
                         changed = true;
                         break;
+                    } else {
+                        action = choice->second;
                     }
 
-                    const auto position = static_cast<std::size_t>(choice->second);
+                    const auto position = static_cast<std::size_t>(action);
                     if (position >= observation.original_columns.size()) {
                         throw std::runtime_error("canonical action is out of range");
                     }
@@ -400,7 +628,8 @@ int main(int argc, char** argv) try {
                 ++completed;
             }
 
-            if (completed > best_completed || best_choices.empty()) {
+            if (completed > best_completed || !have_best) {
+                have_best = true;
                 best_completed = completed;
                 best_choices = choices;
                 best_domains = domains;
@@ -421,6 +650,12 @@ int main(int argc, char** argv) try {
         }
     }
 
+    if (found) {
+        for (auto rule = best_choices.begin(); rule != best_choices.end();) {
+            if (best_domains.count(rule->first) == 0) rule = best_choices.erase(rule);
+            else ++rule;
+        }
+    }
     const auto verified_replay_states = found
         ? verify_controller(models, best_choices, options, colors, empty_columns)
         : 0;

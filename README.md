@@ -229,6 +229,25 @@ sample result; `success=false` only exhausts the randomized restart budget.
 The `Synthesize c4 k2 controlled policy` workflow repeats the search with
 independent seeds and merges their reports.
 
+A controller can instead use a simple finite default rule and store only its
+exceptions:
+
+```bash
+./build/water-policy-control \
+  --catalog out/all-heights/instances.tsv \
+  --conflicts out/all-heights/conflicts.tsv \
+  --depth 3 --goal-exhausted 2 \
+  --default-heuristic last \
+  --restarts 64 --repair-passes 128 --seed 1 \
+  --out out/compressed-policy
+```
+
+Here `last` means the last currently legal source in the canonical column
+order. On the 3,501-instance catalog, this default needs only 115 sampled
+exceptions instead of a rule for every observed signature. The `Compress c4
+k2 controlled policy` workflow compares several such defaults and measures
+whether their exception sets remain stable across independent seeds.
+
 For an unsolvable instance, write and independently check a certificate:
 
 ```bash

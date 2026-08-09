@@ -76,6 +76,19 @@ This remains randomized finite-catalog synthesis:
 - an all-height theorem still needs a symbolic closure proof over every
   possible hidden suffix.
 
+### Default rule plus exceptions
+
+The full sampled controller can be represented more compactly by first trying
+a deterministic local rule and storing a table only where that rule must be
+overridden. The current best baseline selects the last legal source in
+canonical column order. On the 3,501 sampled initial instances, it reaches the
+frontier after adding 115 exception signatures; every resulting trajectory is
+then replayed from scratch.
+
+This is a useful conjecture generator: exceptions can be grouped into a small
+number of deficient/hosted and visible-column shapes. It is not a proof that
+only those exceptions exist at untested heights.
+
 ## Local use
 
 Collect observations:
@@ -106,6 +119,18 @@ Search a shared controller over a merged catalog:
   --depth 3 --goal-exhausted 2 \
   --restarts 256 --repair-passes 128 --seed 1 \
   --out out/controlled
+```
+
+Compress the same controller around a finite default rule:
+
+```bash
+./build/water-policy-control \
+  --catalog merged/instances.tsv \
+  --conflicts merged/conflicts.tsv \
+  --depth 3 --goal-exhausted 2 \
+  --default-heuristic last \
+  --restarts 64 --repair-passes 128 --seed 1 \
+  --out out/compressed
 ```
 
 The `Attack c4 k2 frontier policy` workflow collects exact observations and

@@ -133,6 +133,16 @@ if(BUILD_TESTING)
             --repair-passes 16
             --seed 1
             --out ${CMAKE_CURRENT_BINARY_DIR}/test-policy-control-output)
+    add_test(NAME water-policy-compression-smoke
+        COMMAND water-policy-control
+            --catalog ${CMAKE_CURRENT_SOURCE_DIR}/tests/data/policy-catalog.tsv
+            --depth 3
+            --goal-exhausted 2
+            --default-heuristic last
+            --restarts 8
+            --repair-passes 16
+            --seed 1
+            --out ${CMAKE_CURRENT_BINARY_DIR}/test-policy-compression-output)
     function(add_universe_regression NAME HEIGHT COLORS EMPTY CLASSES UNSOLVABLE)
         add_test(NAME ${NAME}
             COMMAND water-universe
