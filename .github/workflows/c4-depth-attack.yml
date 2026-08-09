@@ -2,6 +2,10 @@ name: Attack c4 k2 observation depth
 run-name: Synthesize and attack unit depth over combined catalogs
 
 on:
+  # Bootstrap this research workflow before the draft PR reaches main.
+  push:
+    branches: [agent/minimum-height-five]
+    paths: [.github/workflows/c4-depth-attack.yml]
   workflow_dispatch:
     inputs:
       catalog_runs:
@@ -47,8 +51,8 @@ jobs:
       - name: Build matrices
         id: matrix
         env:
-          POLICIES: ${{ inputs.policy_attempts }}
-          SHARDS: ${{ inputs.shards }}
+          POLICIES: ${{ inputs.policy_attempts || '2' }}
+          SHARDS: ${{ inputs.shards || '8' }}
         run: |
           echo "policies=$(jq -cn --argjson count "$POLICIES" '[range(0; $count)]')" >> "$GITHUB_OUTPUT"
           echo "shards=$SHARDS" >> "$GITHUB_OUTPUT"
@@ -56,7 +60,7 @@ jobs:
       - name: Download and union exact catalogs
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          RUNS: ${{ inputs.catalog_runs }}
+          RUNS: ${{ inputs.catalog_runs || '31328370710,31331372346' }}
         run: |
           IFS=',' read -ra run_ids <<< "$RUNS"
           for raw in "${run_ids[@]}"; do
@@ -106,7 +110,7 @@ jobs:
       - run: tar -xzf depth-attack-inputs.tar.gz
       - name: Synthesize a last-rule controller plus exceptions
         env:
-          RESTARTS: ${{ inputs.restarts }}
+          RESTARTS: ${{ inputs.restarts || '128' }}
         run: |
           seed=$((${{ github.run_id }} * 16 + ${{ matrix.policy }}))
           bundle/water-policy-control \
@@ -149,7 +153,7 @@ jobs:
       - name: Attack observation windows two through five
         run: |
           mapfile -t policies_found < <(find policies -name policy.tsv -type f | sort)
-          test "${#policies_found[@]}" -eq "${{ inputs.policy_attempts }}"
+          test "${#policies_found[@]}" -eq "${{ inputs.policy_attempts || '2' }}"
           args=()
           for policy in "${policies_found[@]}"; do args+=(--policy "$policy"); done
           bundle/water-unit-scenes \
