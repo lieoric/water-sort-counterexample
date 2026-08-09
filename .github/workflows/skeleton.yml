@@ -1,15 +1,20 @@
-name: Scan known counterexample family
+name: Scan minimized run skeleton
 
 on:
   workflow_dispatch:
     inputs:
-      empty_columns:
-        description: Empty columns used for the exact scan
+      height:
+        description: Target tube height for the fixed run-color skeleton
         required: true
-        default: "3"
+        default: "16"
+        type: string
+      candidate_limit:
+        description: Unique symmetry classes evaluated per shard
+        required: true
+        default: "5000"
         type: string
       certificate_limit:
-        description: Maximum NO certificates saved per shard
+        description: NO certificates saved per shard
         required: true
         default: "5"
         type: string
@@ -18,7 +23,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: known-family-${{ github.ref }}-${{ inputs.empty_columns }}
+  group: skeleton-${{ github.ref }}-${{ inputs.height }}
   cancel-in-progress: false
 
 jobs:
@@ -32,17 +37,17 @@ jobs:
           cmake --build build --parallel 2
           ctest --test-dir build --output-on-failure
           mkdir tools
-          cp build/water-neighborhood build/water-verify tools/
+          cp build/water-skeleton build/water-verify tools/
           tar -czf water-tools.tar.gz tools
       - uses: actions/upload-artifact@v6
         with:
-          name: water-tools
+          name: skeleton-tools
           path: water-tools.tar.gz
           retention-days: 7
 
   scan:
     needs: prepare
-    name: Threshold shard ${{ matrix.shard }} of 16
+    name: Skeleton shard ${{ matrix.shard }} of 16
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
@@ -54,16 +59,18 @@ jobs:
       - uses: actions/checkout@v5
       - uses: actions/download-artifact@v6
         with:
-          name: water-tools
+          name: skeleton-tools
       - name: Extract tools
         run: tar -xzf water-tools.tar.gz
-      - name: Scan seeds and every one-swap neighbor
+      - name: Enumerate run-length assignments
         run: |
-          tools/water-neighborhood \
-            --seed-dir counterexamples \
-            --empty "${{ inputs.empty_columns }}" \
+          tools/water-skeleton \
+            --input experiments/minimized-15b.txt \
+            --height "${{ inputs.height }}" \
+            --empty 2 \
             --shard "${{ matrix.shard }}" \
             --shards 16 \
+            --candidate-limit "${{ inputs.candidate_limit }}" \
             --certificate-limit "${{ inputs.certificate_limit }}" \
             --out "out/shard-${{ matrix.shard }}"
       - name: Independently verify saved NO certificates
@@ -74,7 +81,7 @@ jobs:
               --input "$instance" \
               --certificate "${instance%.txt}.wscert"
           done
-      - name: Add shard report to summary
+      - name: Add report to summary
         if: always()
         run: |
           if test -f "out/shard-${{ matrix.shard }}/report.json"; then
@@ -85,7 +92,7 @@ jobs:
       - uses: actions/upload-artifact@v6
         if: always()
         with:
-          name: threshold-shard-${{ matrix.shard }}
+          name: skeleton-shard-${{ matrix.shard }}
           path: out/shard-${{ matrix.shard }}/
           if-no-files-found: error
           retention-days: 30
@@ -97,30 +104,30 @@ jobs:
     steps:
       - uses: actions/download-artifact@v6
         with:
-          pattern: threshold-shard-*
+          pattern: skeleton-shard-*
           path: collected
       - name: Merge exact classes
         run: |
           mkdir merged
-          printf 'class_id\tresult\tempty\tdistance\tborders\toracle_states\tterminals\tsignatures\tcanonical\n' \
+          printf 'class_id\tresult\theight\tempty\tborders\toracle_states\tterminals\tsignatures\tlengths\tcanonical\n' \
             > merged/results.tsv
           find collected -name results.tsv -type f -print0 | sort -z | \
             while IFS= read -r -d '' file; do tail -n +2 "$file"; done \
-            | LC_ALL=C sort -t $'\t' -k1,1 -k4,4n \
-            | awk -F '\t' '!seen[$1]++' >> merged/results.tsv
+            | LC_ALL=C sort -u >> merged/results.tsv
           total=$(tail -n +2 merged/results.tsv | wc -l)
           yes=$(tail -n +2 merged/results.tsv | awk -F '\t' '$2 == "YES" {n++} END {print n+0}')
           no=$(tail -n +2 merged/results.tsv | awk -F '\t' '$2 == "NO" {n++} END {print n+0}')
           {
-            echo "## Known-family threshold scan"
+            echo "## Fixed run-skeleton scan"
             echo
-            echo "- Empty columns: ${{ inputs.empty_columns }}"
+            echo "- Height: ${{ inputs.height }}"
+            echo "- Run-color skeleton: experiments/minimized-15b.txt"
             echo "- Exact symmetry classes: $total"
             echo "- Solvable: $yes"
             echo "- Unsolvable: $no"
           } | tee merged/summary.md >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v6
         with:
-          name: threshold-merged-empty-${{ inputs.empty_columns }}
+          name: skeleton-merged-height-${{ inputs.height }}
           path: merged/
           retention-days: 30

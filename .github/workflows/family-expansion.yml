@@ -1,15 +1,20 @@
-name: Scan known counterexample family
+name: Expand two-empty counterexample family
 
 on:
   workflow_dispatch:
     inputs:
-      empty_columns:
-        description: Empty columns used for the exact scan
+      radius:
+        description: Swap radius around each mother instance
         required: true
-        default: "3"
+        default: "2"
+        type: string
+      frontier_limit:
+        description: Deterministic NO representatives expanded after each layer
+        required: true
+        default: "50"
         type: string
       certificate_limit:
-        description: Maximum NO certificates saved per shard
+        description: NO certificates saved per distance and job
         required: true
         default: "5"
         type: string
@@ -18,7 +23,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: known-family-${{ github.ref }}-${{ inputs.empty_columns }}
+  group: two-empty-family-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
@@ -36,70 +41,84 @@ jobs:
           tar -czf water-tools.tar.gz tools
       - uses: actions/upload-artifact@v6
         with:
-          name: water-tools
+          name: family-tools
           path: water-tools.tar.gz
           retention-days: 7
 
-  scan:
+  expand:
     needs: prepare
-    name: Threshold shard ${{ matrix.shard }} of 16
+    name: Expand ${{ matrix.id }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
       fail-fast: false
-      max-parallel: 16
+      max-parallel: 6
       matrix:
-        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
+        include:
+          - id: ce-000
+            input: counterexamples/ce-000.txt
+          - id: ce-004
+            input: counterexamples/ce-004.txt
+          - id: ce-005
+            input: counterexamples/ce-005.txt
+          - id: ce-006
+            input: counterexamples/ce-006.txt
+          - id: ce-007
+            input: counterexamples/ce-007.txt
+          - id: minimized-15b
+            input: experiments/minimized-15b.txt
     steps:
       - uses: actions/checkout@v5
       - uses: actions/download-artifact@v6
         with:
-          name: water-tools
+          name: family-tools
       - name: Extract tools
         run: tar -xzf water-tools.tar.gz
-      - name: Scan seeds and every one-swap neighbor
+      - name: Expand verified NO frontier
         run: |
+          mkdir seed
+          cp "${{ matrix.input }}" "seed/${{ matrix.id }}.txt"
           tools/water-neighborhood \
-            --seed-dir counterexamples \
-            --empty "${{ inputs.empty_columns }}" \
-            --shard "${{ matrix.shard }}" \
-            --shards 16 \
+            --seed-dir seed \
+            --empty 2 \
+            --radius "${{ inputs.radius }}" \
+            --frontier-limit "${{ inputs.frontier_limit }}" \
             --certificate-limit "${{ inputs.certificate_limit }}" \
-            --out "out/shard-${{ matrix.shard }}"
+            --out "out/${{ matrix.id }}"
       - name: Independently verify saved NO certificates
         run: |
-          for instance in out/shard-${{ matrix.shard }}/no-*.txt; do
+          for instance in out/${{ matrix.id }}/no-*.txt; do
             test -e "$instance" || continue
             tools/water-verify \
               --input "$instance" \
               --certificate "${instance%.txt}.wscert"
           done
-      - name: Add shard report to summary
+      - name: Add report to summary
         if: always()
         run: |
-          if test -f "out/shard-${{ matrix.shard }}/report.json"; then
+          if test -f "out/${{ matrix.id }}/report.json"; then
             echo '```json' >> "$GITHUB_STEP_SUMMARY"
-            cat "out/shard-${{ matrix.shard }}/report.json" >> "$GITHUB_STEP_SUMMARY"
+            cat "out/${{ matrix.id }}/report.json" >> "$GITHUB_STEP_SUMMARY"
             echo '```' >> "$GITHUB_STEP_SUMMARY"
           fi
       - uses: actions/upload-artifact@v6
         if: always()
         with:
-          name: threshold-shard-${{ matrix.shard }}
-          path: out/shard-${{ matrix.shard }}/
+          name: family-${{ matrix.id }}
+          path: out/${{ matrix.id }}/
           if-no-files-found: error
           retention-days: 30
 
   merge:
-    needs: scan
+    needs: expand
     if: always()
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v6
         with:
-          pattern: threshold-shard-*
+          pattern: family-*
           path: collected
-      - name: Merge exact classes
+      - name: Merge exact classes at minimum observed distance
         run: |
           mkdir merged
           printf 'class_id\tresult\tempty\tdistance\tborders\toracle_states\tterminals\tsignatures\tcanonical\n' \
@@ -112,15 +131,19 @@ jobs:
           yes=$(tail -n +2 merged/results.tsv | awk -F '\t' '$2 == "YES" {n++} END {print n+0}')
           no=$(tail -n +2 merged/results.tsv | awk -F '\t' '$2 == "NO" {n++} END {print n+0}')
           {
-            echo "## Known-family threshold scan"
+            echo "## Two-empty counterexample family expansion"
             echo
-            echo "- Empty columns: ${{ inputs.empty_columns }}"
+            echo "- Radius: ${{ inputs.radius }}"
+            echo "- Frontier limit per mother: ${{ inputs.frontier_limit }}"
             echo "- Exact symmetry classes: $total"
             echo "- Solvable: $yes"
             echo "- Unsolvable: $no"
+            echo
+            echo "### Minimum-distance distribution"
+            tail -n +2 merged/results.tsv | awk -F '\t' '{all[$4]++; if ($2 == "NO") no[$4]++} END {for (d in all) print "- Distance " d ": " all[d] " classes, " no[d]+0 " NO"}' | sort
           } | tee merged/summary.md >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v6
         with:
-          name: threshold-merged-empty-${{ inputs.empty_columns }}
+          name: family-merged-radius-${{ inputs.radius }}
           path: merged/
           retention-days: 30

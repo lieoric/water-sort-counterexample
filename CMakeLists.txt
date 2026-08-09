@@ -47,6 +47,9 @@ target_link_libraries(water-neighborhood PRIVATE water_sort)
 add_executable(water-minimize apps/minimize.cpp)
 target_link_libraries(water-minimize PRIVATE water_sort)
 
+add_executable(water-skeleton apps/skeleton.cpp)
+target_link_libraries(water-skeleton PRIVATE water_sort)
+
 include(CTest)
 if(BUILD_TESTING)
     add_executable(water-sort-tests tests/test_main.cpp)
@@ -54,4 +57,26 @@ if(BUILD_TESTING)
     target_compile_definitions(water-sort-tests PRIVATE
         WSC_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
     add_test(NAME water-sort-tests COMMAND water-sort-tests)
+    file(GLOB WSC_EXPERIMENT_INSTANCES "${CMAKE_CURRENT_SOURCE_DIR}/experiments/*.txt")
+    foreach(WSC_EXPERIMENT_INSTANCE IN LISTS WSC_EXPERIMENT_INSTANCES)
+        get_filename_component(WSC_EXPERIMENT_NAME ${WSC_EXPERIMENT_INSTANCE} NAME_WE)
+        add_test(NAME water-experiment-${WSC_EXPERIMENT_NAME}
+            COMMAND water-verify
+                --input ${WSC_EXPERIMENT_INSTANCE}
+                --certificate ${CMAKE_CURRENT_SOURCE_DIR}/experiments/${WSC_EXPERIMENT_NAME}.wscert)
+    endforeach()
+    add_test(NAME water-skeleton-smoke
+        COMMAND water-skeleton
+            --input ${CMAKE_CURRENT_SOURCE_DIR}/experiments/minimized-15b.txt
+            --candidate-limit 20
+            --certificate-limit 0
+            --out ${CMAKE_CURRENT_BINARY_DIR}/test-skeleton-output)
+    add_test(NAME water-family-radius-two-smoke
+        COMMAND water-neighborhood
+            --seed-dir ${CMAKE_CURRENT_SOURCE_DIR}/experiments
+            --empty 2
+            --radius 2
+            --frontier-limit 1
+            --certificate-limit 0
+            --out ${CMAKE_CURRENT_BINARY_DIR}/test-family-output)
 endif()

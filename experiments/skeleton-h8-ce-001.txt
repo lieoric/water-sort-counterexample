@@ -1,0 +1,9 @@
+# Exact fixed-skeleton scan counterexample; columns are bottom-to-top.
+height=8
+colors=5
+empty=2
+column=00011120
+column=00331110
+column=12244444
+column=24443330
+column=31223322

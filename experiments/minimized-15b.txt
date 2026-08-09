@@ -1,0 +1,10 @@
+# A 15-border representative found by GitHub Actions run 31311471973.
+# Columns are written bottom-to-top.
+height=16
+colors=5
+empty=2
+column=0000000111112200
+column=0033333111111000
+column=1112222444444444
+column=2224444444333300
+column=3333112222333222
