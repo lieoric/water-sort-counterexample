@@ -53,6 +53,9 @@ target_link_libraries(water-skeleton PRIVATE water_sort)
 add_executable(water-universe apps/universe.cpp)
 target_link_libraries(water-universe PRIVATE water_sort)
 
+add_executable(water-descend apps/descend.cpp)
+target_link_libraries(water-descend PRIVATE water_sort)
+
 include(CTest)
 if(BUILD_TESTING)
     add_executable(water-sort-tests tests/test_main.cpp)
@@ -82,6 +85,26 @@ if(BUILD_TESTING)
             --frontier-limit 1
             --certificate-limit 0
             --out ${CMAKE_CURRENT_BINARY_DIR}/test-family-output)
+    add_test(NAME water-hunter-uniform-layer-smoke
+        COMMAND water-hunter
+            --seed 1
+            --seconds 0
+            --iterations 10
+            --solution-cap 10
+            --height 6
+            --colors 4
+            --empty 2
+            --uniform-layer 1
+            --isolate-uniform-layer 1
+            --fully-alternating 1
+            --out ${CMAKE_CURRENT_BINARY_DIR}/test-uniform-layer-output)
+    add_test(NAME water-descend-noop-smoke
+        COMMAND water-descend
+            --input ${CMAKE_CURRENT_SOURCE_DIR}/experiments/minimum-h5-ce-000.txt
+            --target-height 5
+            --frontier-limit 4
+            --seed 1
+            --out ${CMAKE_CURRENT_BINARY_DIR}/test-descend-output)
     function(add_universe_regression NAME HEIGHT COLORS EMPTY CLASSES UNSOLVABLE)
         add_test(NAME ${NAME}
             COMMAND water-universe

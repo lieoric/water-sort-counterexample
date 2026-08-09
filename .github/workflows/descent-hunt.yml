@@ -1,0 +1,138 @@
+name: Hunt and descend counterexample
+run-name: Descent c${{ inputs.colors }} h${{ inputs.start_height }}→${{ inputs.target_height }} k${{ inputs.empty_columns }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      start_height:
+        description: Height searched for the initial counterexample
+        required: true
+        default: "9"
+        type: string
+      target_height:
+        description: Lowest height attempted by balanced deletion
+        required: true
+        default: "6"
+        type: string
+      colors:
+        description: Colors and initially full columns
+        required: true
+        default: "4"
+        type: string
+      empty_columns:
+        description: Initially empty columns
+        required: true
+        default: "2"
+        type: string
+      seconds:
+        description: Hunter seconds per shard
+        required: true
+        default: "900"
+        type: string
+      solution_cap:
+        description: Border-sequence count cap used as hunter fitness
+        required: true
+        default: "10000"
+        type: string
+      frontier_limit:
+        description: Certified NO descendants retained at each height
+        required: true
+        default: "64"
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: descent-hunt-${{ github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Build and validate once
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DWSC_WARNINGS_AS_ERRORS=ON
+          cmake --build build --parallel 2
+          ctest --test-dir build --output-on-failure
+          mkdir tools
+          cp build/water-hunter build/water-descend build/water-verify tools/
+          tar -czf water-tools.tar.gz tools
+      - uses: actions/upload-artifact@v6
+        with:
+          name: descent-tools
+          path: water-tools.tar.gz
+          retention-days: 7
+
+  search:
+    needs: prepare
+    name: Shard ${{ matrix.shard }} of 8
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      max-parallel: 8
+      matrix:
+        shard: [0, 1, 2, 3, 4, 5, 6, 7]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v6
+        with:
+          name: descent-tools
+      - run: tar -xzf water-tools.tar.gz
+      - name: Hunt at the start height
+        run: |
+          tools/water-hunter \
+            --seed "${{ github.run_id }}" \
+            --shard "${{ matrix.shard }}" \
+            --shards 8 \
+            --seconds "${{ inputs.seconds }}" \
+            --solution-cap "${{ inputs.solution_cap }}" \
+            --height "${{ inputs.start_height }}" \
+            --colors "${{ inputs.colors }}" \
+            --empty "${{ inputs.empty_columns }}" \
+            --out "out/hunt"
+      - name: Verify the high counterexample
+        if: ${{ hashFiles('out/hunt/counterexample.txt') != '' }}
+        run: |
+          tools/water-verify \
+            --input out/hunt/counterexample.txt \
+            --certificate out/hunt/counterexample.wscert
+      - name: Descend through balanced deletions
+        if: ${{ hashFiles('out/hunt/counterexample.txt') != '' }}
+        continue-on-error: true
+        run: |
+          tools/water-descend \
+            --input out/hunt/counterexample.txt \
+            --target-height "${{ inputs.target_height }}" \
+            --frontier-limit "${{ inputs.frontier_limit }}" \
+            --seed "$(( ${{ github.run_id }} + ${{ matrix.shard }} ))" \
+            --out out/descent
+      - name: Verify the complete descent path
+        if: ${{ hashFiles(format('out/descent/h{0}.txt', inputs.target_height)) != '' }}
+        run: |
+          for instance in out/descent/h*.txt; do
+            tools/water-verify \
+              --input "$instance" \
+              --certificate "${instance%.txt}.wscert"
+          done
+      - name: Add reports to summary
+        if: always()
+        run: |
+          for report in out/hunt/report.json out/descent/report.json; do
+            test -f "$report" || continue
+            echo "### $report" >> "$GITHUB_STEP_SUMMARY"
+            echo '```json' >> "$GITHUB_STEP_SUMMARY"
+            cat "$report" >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+          done
+      - name: Upload shard artifacts
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: descent-hunt-shard-${{ matrix.shard }}
+          path: out/
+          if-no-files-found: error
+          retention-days: 30

@@ -1,4 +1,5 @@
 name: Hunt counterexample
+run-name: Hunt c${{ inputs.colors }} h${{ inputs.height }} k${{ inputs.empty_columns }} layer${{ inputs.uniform_layer }}
 
 on:
   workflow_dispatch:
@@ -28,6 +29,31 @@ on:
         required: true
         default: "2"
         type: string
+      uniform_layer:
+        description: Fix this bottom-based layer to color 0; -1 disables
+        required: true
+        default: "-1"
+        type: string
+      isolate_uniform_layer:
+        description: Keep color 0 out of the two neighboring layers (0 or 1)
+        required: true
+        default: "0"
+        type: string
+      fully_alternating:
+        description: Require every adjacent pair in a column to differ (0 or 1)
+        required: true
+        default: "0"
+        type: string
+      target_height:
+        description: Descend a found NO to this height; 0 disables
+        required: true
+        default: "0"
+        type: string
+      frontier_limit:
+        description: Certified NO descendants retained at each height
+        required: true
+        default: "64"
+        type: string
 
 permissions:
   contents: read
@@ -47,7 +73,7 @@ jobs:
           cmake --build build --parallel 2
           ctest --test-dir build --output-on-failure
           mkdir tools
-          cp build/water-hunter build/water-verify tools/
+          cp build/water-hunter build/water-descend build/water-verify tools/
           tar -czf water-tools.tar.gz tools
       - uses: actions/upload-artifact@v6
         with:
@@ -82,6 +108,9 @@ jobs:
             --height "${{ inputs.height }}" \
             --colors "${{ inputs.colors }}" \
             --empty "${{ inputs.empty_columns }}" \
+            --uniform-layer "${{ inputs.uniform_layer }}" \
+            --isolate-uniform-layer "${{ inputs.isolate_uniform_layer }}" \
+            --fully-alternating "${{ inputs.fully_alternating }}" \
             --out "out/shard-${{ matrix.shard }}"
       - name: Verify a discovered counterexample
         if: ${{ hashFiles(format('out/shard-{0}/counterexample.txt', matrix.shard)) != '' }}
@@ -89,6 +118,24 @@ jobs:
           tools/water-verify \
             --input "out/shard-${{ matrix.shard }}/counterexample.txt" \
             --certificate "out/shard-${{ matrix.shard }}/counterexample.wscert"
+      - name: Descend a discovered counterexample
+        if: ${{ hashFiles(format('out/shard-{0}/counterexample.txt', matrix.shard)) != '' && inputs.target_height != '0' }}
+        continue-on-error: true
+        run: |
+          tools/water-descend \
+            --input "out/shard-${{ matrix.shard }}/counterexample.txt" \
+            --target-height "${{ inputs.target_height }}" \
+            --frontier-limit "${{ inputs.frontier_limit }}" \
+            --seed "$(( ${{ github.run_id }} + ${{ matrix.shard }} ))" \
+            --out "out/shard-${{ matrix.shard }}/descent"
+      - name: Verify a complete descent path
+        if: ${{ hashFiles(format('out/shard-{0}/descent/h{1}.txt', matrix.shard, inputs.target_height)) != '' }}
+        run: |
+          for instance in "out/shard-${{ matrix.shard }}"/descent/h*.txt; do
+            tools/water-verify \
+              --input "$instance" \
+              --certificate "${instance%.txt}.wscert"
+          done
       - name: Add shard report to summary
         if: always()
         run: |

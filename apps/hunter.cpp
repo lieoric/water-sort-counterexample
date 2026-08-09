@@ -26,6 +26,9 @@ struct Options {
     std::uint32_t height = 16;
     std::uint32_t colors = 5;
     std::uint32_t empty_columns = 2;
+    std::int32_t uniform_layer = -1;
+    bool isolate_uniform_layer = false;
+    bool fully_alternating = false;
     std::filesystem::path out = "out";
 };
 
@@ -44,36 +47,83 @@ bool better(const Evaluation& left, const Evaluation& right, std::uint64_t cap) 
     return false;
 }
 
-water_sort::Instance random_instance(const Options& options, std::mt19937_64& rng) {
-    water_sort::Instance instance;
-    instance.height = options.height;
-    instance.color_count = options.colors;
-    instance.empty_columns = options.empty_columns;
-    std::vector<water_sort::Color> items;
-    items.reserve(static_cast<std::size_t>(options.height) * options.colors);
-    for (water_sort::Color color = 0; color < options.colors; ++color) {
-        items.insert(items.end(), options.height, color);
+bool satisfies_structure(const water_sort::Instance& instance, const Options& options) {
+    for (const auto& column : instance.columns) {
+        if (options.uniform_layer >= 0 &&
+            column[static_cast<std::size_t>(options.uniform_layer)] != 0) {
+            return false;
+        }
+        for (std::size_t position = 0; position < column.size(); ++position) {
+            if (options.isolate_uniform_layer && column[position] == 0 &&
+                (static_cast<std::int32_t>(position) == options.uniform_layer - 1 ||
+                 static_cast<std::int32_t>(position) == options.uniform_layer + 1)) {
+                return false;
+            }
+            if (options.fully_alternating && position > 0 &&
+                column[position] == column[position - 1]) {
+                return false;
+            }
+        }
     }
-    std::shuffle(items.begin(), items.end(), rng);
-    for (std::size_t column = 0; column < options.colors; ++column) {
-        const auto first = items.begin() +
-            static_cast<std::ptrdiff_t>(column * options.height);
-        instance.columns.emplace_back(first, first + options.height);
-    }
-    return instance;
+    return true;
 }
 
-void mutate(water_sort::Instance& instance, std::mt19937_64& rng) {
+water_sort::Instance random_instance(const Options& options, std::mt19937_64& rng) {
+    while (true) {
+        water_sort::Instance instance;
+        instance.height = options.height;
+        instance.color_count = options.colors;
+        instance.empty_columns = options.empty_columns;
+        std::vector<water_sort::Color> items;
+        items.reserve(static_cast<std::size_t>(options.height) * options.colors);
+        for (water_sort::Color color = 0; color < options.colors; ++color) {
+            auto count = options.height;
+            if (options.uniform_layer >= 0 && color == 0) {
+                count -= options.colors;
+            }
+            items.insert(items.end(), count, color);
+        }
+        std::shuffle(items.begin(), items.end(), rng);
+        auto item = items.begin();
+        for (std::size_t column = 0; column < options.colors; ++column) {
+            auto& output = instance.columns.emplace_back();
+            output.reserve(options.height);
+            for (std::uint32_t position = 0; position < options.height; ++position) {
+                if (options.uniform_layer >= 0 &&
+                    position == static_cast<std::uint32_t>(options.uniform_layer)) {
+                    output.push_back(0);
+                } else {
+                    output.push_back(*item++);
+                }
+            }
+        }
+        if (satisfies_structure(instance, options)) return instance;
+    }
+}
+
+void mutate(water_sort::Instance& instance,
+            std::mt19937_64& rng,
+            const Options& options) {
     const auto cell_count = instance.columns.size() * instance.height;
     std::uniform_int_distribution<std::size_t> position(0, cell_count - 1);
-    auto first = position(rng);
-    auto second = position(rng);
-    auto& a = instance.columns[first / instance.height][first % instance.height];
-    while (second == first ||
-           instance.columns[second / instance.height][second % instance.height] == a) {
-        second = position(rng);
+    const auto is_fixed = [&](std::size_t index) {
+        return options.uniform_layer >= 0 &&
+            index % instance.height == static_cast<std::size_t>(options.uniform_layer);
+    };
+    while (true) {
+        auto first = position(rng);
+        while (is_fixed(first)) first = position(rng);
+        auto second = position(rng);
+        auto& a = instance.columns[first / instance.height][first % instance.height];
+        while (is_fixed(second) || second == first ||
+               instance.columns[second / instance.height][second % instance.height] == a) {
+            second = position(rng);
+        }
+        auto& b = instance.columns[second / instance.height][second % instance.height];
+        std::swap(a, b);
+        if (satisfies_structure(instance, options)) return;
+        std::swap(a, b);
     }
-    std::swap(a, instance.columns[second / instance.height][second % instance.height]);
 }
 
 Evaluation evaluate(const water_sort::Instance& instance, std::uint64_t cap) {
@@ -97,6 +147,11 @@ void write_report(const Options& options,
            << "  \"height\": " << options.height << ",\n"
            << "  \"colors\": " << options.colors << ",\n"
            << "  \"empty_columns\": " << options.empty_columns << ",\n"
+           << "  \"uniform_layer\": " << options.uniform_layer << ",\n"
+           << "  \"isolate_uniform_layer\": "
+           << (options.isolate_uniform_layer ? "true" : "false") << ",\n"
+           << "  \"fully_alternating\": "
+           << (options.fully_alternating ? "true" : "false") << ",\n"
            << "  \"best_border_sequences\": " << best.solutions << ",\n"
            << "  \"best_states_evaluated\": " << best.states << ",\n"
            << "  \"counterexample_found\": " << (found ? "true" : "false") << "\n"
@@ -125,17 +180,28 @@ Options parse_options(int argc, char** argv) {
             options.colors = static_cast<std::uint32_t>(std::stoul(value()));
         } else if (argument == "--empty") {
             options.empty_columns = static_cast<std::uint32_t>(std::stoul(value()));
+        } else if (argument == "--uniform-layer") {
+            options.uniform_layer = static_cast<std::int32_t>(std::stoi(value()));
+        } else if (argument == "--isolate-uniform-layer") {
+            options.isolate_uniform_layer = std::stoi(value()) != 0;
+        } else if (argument == "--fully-alternating") {
+            options.fully_alternating = std::stoi(value()) != 0;
         }
         else if (argument == "--out") options.out = value();
         else if (argument == "--help") {
             std::cout << "water-hunter [--seed N] [--shard I --shards N] [--seconds N] "
                          "[--iterations N] [--solution-cap N] [--height H] [--colors N] "
-                         "[--empty K] [--out DIR]\n";
+                         "[--empty K] [--uniform-layer POSITION] "
+                         "[--isolate-uniform-layer 0|1] [--fully-alternating 0|1] [--out DIR]\n";
             std::exit(0);
         } else throw std::runtime_error("unknown argument: " + argument);
     }
     if (options.shards == 0 || options.shard >= options.shards || options.solution_cap == 0 ||
         options.height == 0 || options.colors == 0 || options.colors > 36 ||
+        options.uniform_layer < -1 ||
+        options.uniform_layer >= static_cast<std::int32_t>(options.height) ||
+        (options.uniform_layer >= 0 && options.height < options.colors) ||
+        (options.isolate_uniform_layer && options.uniform_layer < 0) ||
         (options.seconds == 0 && options.iterations == 0)) {
         throw std::runtime_error("invalid hunter options");
     }
@@ -164,7 +230,7 @@ int main(int argc, char** argv) try {
            (options.seconds == 0 || std::chrono::steady_clock::now() < deadline)) {
         ++iteration;
         auto candidate = current;
-        mutate(candidate, rng);
+        mutate(candidate, rng, options);
         const auto candidate_eval = evaluate(candidate, options.solution_cap);
         if (better(candidate_eval, best_eval, options.solution_cap)) {
             best = candidate;
