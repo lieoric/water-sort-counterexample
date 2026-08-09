@@ -115,6 +115,32 @@ than reached by a continuous physical rearrangement. The report counts every
 such `retightening_gap`. Closing those gaps, and proving closure over arbitrary
 hidden suffixes, are separate proof obligations.
 
+### Current finite-catalog result
+
+The two compressed controllers were expanded over all 3,501 catalog instances
+(heights 4, 5, 6, 7, 8, 9, 12, and 16). The merged run replayed 156,873 macro
+checkpoints and 607,860 legal one-item moves, and witnessed all 119 exception
+signatures from the union of the two macro policies.
+
+| Visible top items | Distinct unit scenes | Conflicts |
+|---:|---:|---:|
+| 2 | 66,503 | 38 |
+| 3 | 151,240 | 5 |
+| 4 | 229,128 | 0 |
+
+All five window-3 conflicts occur in the idle phase, before choosing the next
+source. They split into only 29 window-4 refinements, each with a nonempty
+common safe action. This supports a compact layered candidate: inspect three
+items normally and consult the fourth item only for five ambiguous three-item
+patterns. It is materially smaller than treating all 229,128 window-4 scenes
+as unrelated rules.
+
+These are exact intersections for the finite catalog and the chosen canonical
+tight representatives, not an all-height theorem. There are 149,871 explicit
+connections still to replace with continuous physical traces or a general
+retightening lemma. The complete result is retained by GitHub Actions run
+[`31331083596`](https://github.com/lieoric/water-sort-counterexample/actions/runs/31331083596).
+
 ## Local use
 
 Collect observations:

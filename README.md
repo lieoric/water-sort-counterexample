@@ -269,6 +269,13 @@ form. Thus this diagnoses a candidate small finite program while explicitly
 counting the still-unproved connections between macro traces. See [the
 thin-layer policy design](docs/thin-layer-policy-learning.md).
 
+On the current 3,501-instance catalog the two compressed controllers produce
+38 conflicts with two visible items, 5 with three, and 0 with four. The five
+three-item conflicts refine into only 29 four-item cases, so the natural
+candidate is a three-item rule with a fourth-item lookup for five ambiguous
+patterns. This remains a finite-catalog result, not a continuous all-height
+proof.
+
 For an unsolvable instance, write and independently check a certificate:
 
 ```bash
