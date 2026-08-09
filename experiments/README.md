@@ -23,3 +23,47 @@ The three height-8 NO classes are committed as `skeleton-h8-ce-000` through
 `skeleton-h8-ce-002`, each with an independent transition-closed certificate.
 This is an exact statement about this fixed run-color skeleton, not about all
 five-color height-8 instances.
+
+## One-empty-column minimal obstructions
+
+The files `k1-minimal-c2-h4`, `k1-minimal-c3-h3`, and
+`k1-minimal-c4-h2` are independently certified NO witnesses at the three
+minimal parameter pairs for one empty column. Complete orderly scans give:
+
+| Colors | Height | Exact classes | YES | NO |
+|---:|---:|---:|---:|---:|
+| 2 | 3 | 7 | 7 | 0 |
+| 3 | 2 | 5 | 5 | 0 |
+| 2 | 4 | 23 | 22 | 1 |
+| 3 | 3 | 55 | 48 | 7 |
+| 4 | 2 | 12 | 11 | 1 |
+
+Height and color monotonicity therefore give the complete balanced-model
+classification `E(c,h,1)` exactly when `c>=2`, `h>=2`, and `c+h>=6`.
+
+## Exact global minimum height
+
+The files `minimum-h5-ce-000` through `minimum-h5-ce-003` are four
+pairwise-inequivalent height-5 NO instances. They were obtained by repeatedly
+removing one unit from one run in every column, using every color exactly once,
+from independently discovered taller NO instances. Every reduction candidate
+was classified by the exact border oracle; the committed binary certificates
+were then checked by the independent transition-closure verifier.
+
+| Instance | Marked states | Checked transitions |
+|---|---:|---:|
+| `minimum-h5-ce-000` | 371 | 1,855 |
+| `minimum-h5-ce-001` | 371 | 1,855 |
+| `minimum-h5-ce-002` | 255 | 1,275 |
+| `minimum-h5-ce-003` | 255 | 1,275 |
+
+The complete height-4 universe scan examined 113,291,534 orderly
+representations and classified all 21,383,163 exact symmetry classes as YES.
+Together with the height-1 through height-3 scans and the witnesses here, this
+proves that the minimum height admitting a NO instance for five colors, five
+full columns, and two empty columns is exactly 5. The height-4 result is from
+[GitHub Actions run 31315095516](https://github.com/lieoric/water-sort-counterexample/actions/runs/31315095516).
+
+The balanced bottom-layer monotonicity theorem in the main README extends any
+one of these witnesses to every height greater than 5. Thus NO instances exist
+for every `h >= 5`, while the exhaustive scans prove that none exist below 5.

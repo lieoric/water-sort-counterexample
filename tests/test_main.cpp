@@ -8,6 +8,7 @@
 #include <filesystem>
 #include <functional>
 #include <iostream>
+#include <numeric>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -36,6 +37,14 @@ water_sort::Instance ito_h3_k2_n9() {
         {6, 4, 1}, {7, 4, 1}, {8, 4, 1},
         {6, 5, 2}, {7, 5, 2}, {8, 5, 2},
     });
+}
+
+water_sort::Instance add_completed_color(water_sort::Instance instance) {
+    const auto new_color = static_cast<water_sort::Color>(instance.color_count);
+    instance.columns.emplace_back(instance.height, new_color);
+    ++instance.color_count;
+    instance.validate();
+    return instance;
 }
 
 std::uint64_t exhaustive_cross_check(std::uint32_t height, std::uint32_t colors) {
@@ -134,6 +143,43 @@ void run_tests() {
                     analysis.signatures.begin()->first.compact() == "a2-d2-h3-n3,3,3,3,3" &&
                     analysis.signatures.begin()->second == 60,
                 "unexpected deadlock signature for ce-000");
+    }
+
+    {
+        const auto experiments = std::filesystem::path(WSC_SOURCE_DIR) / "experiments";
+        const auto minimum = water_sort::read_instance(experiments / "minimum-h5-ce-000.txt");
+        std::vector<water_sort::Color> bottom_layer(minimum.color_count);
+        std::iota(bottom_layer.begin(), bottom_layer.end(), water_sort::Color{0});
+        std::uint32_t lifts = 0;
+        do {
+            auto lifted = minimum;
+            ++lifted.height;
+            for (std::size_t column = 0; column < lifted.columns.size(); ++column) {
+                lifted.columns[column].insert(lifted.columns[column].begin(),
+                                              bottom_layer[column]);
+            }
+            lifted.validate();
+            require(!water_sort::BorderOracle(lifted).solve().solvable,
+                    "balanced bottom-layer lift unexpectedly became solvable");
+            ++lifts;
+        } while (std::next_permutation(bottom_layer.begin(), bottom_layer.end()));
+        require(lifts == 120, "unexpected number of balanced bottom-layer lifts");
+    }
+
+    {
+        const auto experiments = std::filesystem::path(WSC_SOURCE_DIR) / "experiments";
+        const std::vector<std::string> names{
+            "k1-minimal-c2-h4", "k1-minimal-c3-h3", "k1-minimal-c4-h2"};
+        for (const auto& name : names) {
+            const auto instance = water_sort::read_instance(experiments / (name + ".txt"));
+            require(!water_sort::BorderOracle(instance).solve().solvable,
+                    "one-empty minimal obstruction unexpectedly solved");
+            require(water_sort::verify_no_certificate(
+                        instance, experiments / (name + ".wscert")).valid,
+                    "one-empty minimal obstruction certificate failed verification");
+            require(!water_sort::BorderOracle(add_completed_color(instance)).solve().solvable,
+                    "adding an inert completed color unexpectedly solved a NO instance");
+        }
     }
 
     std::uint64_t exhaustive_cases = 0;

@@ -82,6 +82,23 @@ if(BUILD_TESTING)
             --frontier-limit 1
             --certificate-limit 0
             --out ${CMAKE_CURRENT_BINARY_DIR}/test-family-output)
+    function(add_universe_regression NAME HEIGHT COLORS EMPTY CLASSES UNSOLVABLE)
+        add_test(NAME ${NAME}
+            COMMAND water-universe
+                --height ${HEIGHT}
+                --colors ${COLORS}
+                --empty ${EMPTY}
+                --candidate-limit 0
+                --certificate-limit 0
+                --expect-classes ${CLASSES}
+                --expect-unsolvable ${UNSOLVABLE}
+                --out ${CMAKE_CURRENT_BINARY_DIR}/${NAME}-output)
+    endfunction()
+    add_universe_regression(water-k1-c2-h3 3 2 1 7 0)
+    add_universe_regression(water-k1-c3-h2 2 3 1 5 0)
+    add_universe_regression(water-k1-c2-h4 4 2 1 23 1)
+    add_universe_regression(water-k1-c3-h3 3 3 1 55 7)
+    add_universe_regression(water-k1-c4-h2 2 4 1 12 1)
     add_test(NAME water-universe-height-two
         COMMAND water-universe
             --height 2

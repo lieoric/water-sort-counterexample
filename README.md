@@ -18,6 +18,96 @@ solvability. A completed column contains every unit of its color; pouring it
 into an empty column only exchanges the roles of the completed and empty
 columns, which are unlabeled.
 
+### Bounded multi-stack interpretation
+
+The puzzle is also a finite-state system of bounded stacks. Each column is a
+capacity-`h` stack over a color alphabet. A move pops a maximal compatible
+top run (truncated only by destination capacity) from one stack and pushes it
+onto another; a completed monochrome stack is disabled. Moves whose source and
+destination stack sets are disjoint commute. This makes the model a compact
+case study for reachability, symmetry reduction, and partial-order reduction.
+It is a finite, bounded relative of the
+[multi-stack reachability models](https://doi.org/10.1016/j.ic.2020.104588)
+used to study concurrent recursive programs; exploiting commuting operations
+is standard in
+[dynamic partial-order reduction](https://doi.org/10.1145/1040305.1040315).
+
+The current top-border oracle goes further than merely running independent
+search workers: it replaces concrete buffer-management interleavings by an
+irreversible border-removal DAG. A concurrency/formal-methods treatment would
+need to state that abstraction for a general class of bounded colored
+multi-stack systems and compare it with standard partial-order reduction; the
+fact that the implementation uses stacks or parallel GitHub jobs is not by
+itself a new concurrency result.
+
+### Balanced bottom-layer monotonicity
+
+Let `I` have height `h`, with one full column per color and exactly `h` units
+of every color. Form `I+` at height `h+1` by inserting one new bottom unit in
+every full column, using every color exactly once; the old columns remain
+unchanged above the new layer. Then
+
+```text
+I+ solvable  =>  I solvable,
+I  NO        =>  I+ NO.
+```
+
+To project a border-removal sequence of `I+`, delete the removals of the new
+bottom borders. Before any retained removal, let `r` be the number of columns
+whose old borders are all gone but whose new bottom border remains. The
+projected state of `I` has exactly `r` more monochrome bins. In the balanced
+model each color has at most one columnful of remaining material, so its
+buffer demand `M_c` is either zero or one. An old deficient color can cease to
+be deficient in `I+` only if it is hosted by one of those `r` pending columns;
+one pending column hosts only one color. Therefore
+
+```text
+buffers_needed(I) <= buffers_needed(I+) + r
+monochrome_bins(I)  = monochrome_bins(I+) + r.
+```
+
+Every retained removal that is legal in `I+` is consequently legal in `I`.
+The projected sequence removes all old borders, proving the implication. By
+induction, balanced bottom layers can be added repeatedly. This closure uses
+the condition that color multiplicity equals capacity; it is not asserted for
+arbitrary unbalanced stack systems.
+
+### Balanced parameter frontier
+
+Write `E(c,h,k)` when at least one balanced NO instance exists with `c`
+colors/full columns, height `h`, and `k` initially empty columns. Besides the
+height implication above, existence is monotone in the number of colors:
+
+```text
+E(c,h,k) => E(c+1,h,k).
+```
+
+To construct the larger instance, add a new full monochrome column in a new
+color. It is already completed and locked, so it cannot participate in a move;
+deleting it projects any solution back to the original instance. Consequently,
+for fixed `k`, the NO-existence region is upward closed in `(c,h)`, while the
+universal-YES region is downward closed. Adding empty columns has the opposite
+resource direction: an instance solvable with `k` empty columns remains
+solvable when more empty columns are supplied.
+
+For one empty column, complete scans give the three minimal NO parameter pairs
+
+```text
+(c,h) = (2,4), (3,3), (4,2).
+```
+
+The adjacent maximal safe pairs `(2,3)` and `(3,2)` have respectively 7 and 5
+exact symmetry classes, all YES. The three obstruction scans contain 1 NO
+among 23 classes, 7 NO among 55 classes, and 1 NO among 12 classes. Together
+with parameter monotonicity, this gives the complete existence classification
+
+```text
+E(c,h,1)  <=>  c >= 2 and h >= 2 and c + h >= 6.
+```
+
+The three minimal witnesses and independently checked certificates are stored
+under `experiments/`.
+
 ## What is implemented
 
 - `water-oracle`: an exact top-border dynamic program based on Ito et al.
@@ -200,18 +290,17 @@ Changing `--height` keeps the run-color order but solves new integer length
 constraints, making it possible to test whether the obstruction persists at
 other tube heights.
 
-### Complete low-height search
+### Complete balanced-universe search
 
-To study the first height at which two empty columns can fail, keep five
-colors, five initially full columns, and two empty columns fixed, and scan
-heights upward:
+To scan any balanced parameter point exactly, supply its colors, height, and
+empty-column count to the orderly enumerator:
 
 ```bash
 ./build/water-universe \
-  --height 3 \
-  --colors 5 \
+  --height 5 \
+  --colors 4 \
   --empty 2 \
-  --out out/universe-3
+  --out out/universe-c4-h5-k2
 ```
 
 Each color occurs exactly `height` times. The enumerator uses a
@@ -221,10 +310,30 @@ color renaming and full-column permutation. An unlimited run has
 `stopped_early=false` in `report.json`; this flag must be checked before a
 zero-counterexample result is treated as exhaustive.
 
-The complete scans currently establish that height 1 has one solvable class,
-height 2 has 20 solvable classes, and height 3 has 12,304 solvable classes. The
-known height-8 examples therefore give an upper bound on the global minimum,
-not yet a proof that height 8 is minimal.
+For five colors and two empty columns, the complete scans establish that
+height 1 has one solvable class, height 2 has
+20 solvable classes, height 3 has 12,304 solvable classes, and height 4 has
+21,383,163 solvable classes. There are no NO classes at any of these heights.
+Four independently certified height-5 NO instances are committed under
+`experiments/`, so the global minimum height is exactly
+
+```text
+h_min = 5.
+```
+
+Balanced bottom-layer monotonicity lifts a height-5 witness to every greater
+height. Hence the complete existence classification is
+
+```text
+NO instances exist exactly when h >= 5.
+```
+
+Color monotonicity also turns the complete `(c,h,k)=(5,4,2)` YES result into
+the safe rectangle `c<=5`, `h<=4`, `k=2`.
+
+The height-4 run examined 113,291,534 orderly representations before exact
+symmetry canonicalization. See
+[GitHub Actions run 31315095516](https://github.com/lieoric/water-sort-counterexample/actions/runs/31315095516).
 
 For the committed 20-run skeleton, exhaustive enumeration finds no NO length
 assignment at heights 5, 6, or 7, but finds exactly three NO symmetry classes
@@ -242,9 +351,10 @@ three-empty-column counterexample is
 evidence about this known family only; it is not a proof that every 5x16
 instance is solvable with three empty columns.
 
-`Scan complete low-height universe` distributes the orderly search tree over
-16 shards. Its merge job fails if any shard reaches its candidate limit, so a
-successful merged artifact is a complete classification at that height.
+`Scan complete balanced universe` accepts `colors`, `height`, `empty_columns`,
+and a selectable shard count. It distributes the orderly search tree and
+fails the merge if any shard reaches its candidate limit, so a successful
+merged artifact is a complete classification of that parameter point.
 
 ## Important caveats
 
@@ -262,3 +372,7 @@ successful merged artifact is a complete classification at that height.
   additional unseen descendants.
 - A run-skeleton scan varies lengths only. It says nothing about other
   run-color orders unless they are separately supplied as skeletons.
+- Balanced bottom-layer monotonicity is a statement about the balanced model:
+  one full column per color, color multiplicity equal to capacity, and one
+  permutation of the colors added per new layer. It does not automatically
+  cover unequal color totals or arbitrary padding blocks.

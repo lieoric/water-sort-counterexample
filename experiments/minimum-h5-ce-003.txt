@@ -1,0 +1,9 @@
+# Columns are written bottom-to-top.
+height=5
+colors=5
+empty=2
+column=10231
+column=10223
+column=10341
+column=40234
+column=40234
