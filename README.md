@@ -136,6 +136,9 @@ under `experiments/`.
 - `water-continuous-control`: continuous realization of controlled top-border
   paths using real forced maximal bulk moves, without rebuilding a canonical
   physical state.
+- `water-counter-game`: exact finite-height online-game analysis of the
+  remaining four-color/two-empty macro question, with either bare counter
+  observations or every current next color run committed before source choice.
 - A literal full-state Water BFS with forced bulk moves and locked completed
   columns, used only as a small-instance reference implementation.
 - Exhaustive cross-checks over 1,796 small initial arrangements, plus the
@@ -307,6 +310,16 @@ bulk moves, with zero construction gaps and zero locked-source violations.
 This validates physical realization on the finite catalog; it is not the
 still-missing arbitrary-height macro-policy proof. See
 [`31334595589`](https://github.com/lieoric/water-sort-counterexample/actions/runs/31334595589).
+
+The remaining all-height question is also attacked as a bounded counter game.
+Bare `Q=(z,a_i,s_i,d_c)` observations first lose at height 5, proving that
+those counters alone cannot support one online controller. If every column's
+next maximal color run is committed and visible before source choice, the
+exact game has no losing initial observation through height 5. At height 5
+this closes 2,404,083 reachable observations; 15,121 losing local states are
+all avoidable from every initial observation. These are finite-height policy
+results, not a Water NO certificate or an induction over arbitrary heights.
+See [the bounded counter-game definition and results](docs/counter-game.md).
 
 For an unsolvable instance, write and independently check a certificate:
 

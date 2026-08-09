@@ -71,6 +71,9 @@ target_link_libraries(water-depth-witness PRIVATE water_sort)
 add_executable(water-continuous-control apps/continuous_control.cpp)
 target_link_libraries(water-continuous-control PRIVATE water_sort)
 
+add_executable(water-counter-game apps/counter_game.cpp)
+target_link_libraries(water-counter-game PRIVATE water_sort)
+
 include(CTest)
 if(BUILD_TESTING)
     add_executable(water-sort-tests tests/test_main.cpp)
@@ -177,6 +180,20 @@ if(BUILD_TESTING)
             --goal-exhausted 2
             --max-instances 2
             --out ${CMAKE_CURRENT_BINARY_DIR}/test-continuous-control-output)
+    add_test(NAME water-counter-game-q-smoke
+        COMMAND water-counter-game
+            --height 2
+            --observation q
+            --self-test
+            --report ${CMAKE_CURRENT_BINARY_DIR}/test-counter-q/report.json
+            --witness ${CMAKE_CURRENT_BINARY_DIR}/test-counter-q/witness.txt)
+    add_test(NAME water-counter-game-next-run-smoke
+        COMMAND water-counter-game
+            --height 2
+            --observation next-run
+            --self-test
+            --report ${CMAKE_CURRENT_BINARY_DIR}/test-counter-next/report.json
+            --witness ${CMAKE_CURRENT_BINARY_DIR}/test-counter-next/witness.txt)
     function(add_universe_regression NAME HEIGHT COLORS EMPTY CLASSES UNSOLVABLE)
         add_test(NAME ${NAME}
             COMMAND water-universe
