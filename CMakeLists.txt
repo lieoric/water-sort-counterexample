@@ -68,6 +68,9 @@ target_link_libraries(water-unit-scenes PRIVATE water_sort)
 add_executable(water-depth-witness apps/depth_witness.cpp)
 target_link_libraries(water-depth-witness PRIVATE water_sort)
 
+add_executable(water-continuous-control apps/continuous_control.cpp)
+target_link_libraries(water-continuous-control PRIVATE water_sort)
+
 include(CTest)
 if(BUILD_TESTING)
     add_executable(water-sort-tests tests/test_main.cpp)
@@ -167,6 +170,13 @@ if(BUILD_TESTING)
             --goal-exhausted 2)
     set_tests_properties(water-depth-obstruction PROPERTIES
         PASS_REGULAR_EXPRESSION "\"run_scenes_equal\": false")
+    add_test(NAME water-continuous-control-smoke
+        COMMAND water-continuous-control
+            --catalog ${CMAKE_CURRENT_SOURCE_DIR}/tests/data/policy-catalog.tsv
+            --policy ${CMAKE_CURRENT_SOURCE_DIR}/tests/data/empty-policy.tsv
+            --goal-exhausted 2
+            --max-instances 2
+            --out ${CMAKE_CURRENT_BINARY_DIR}/test-continuous-control-output)
     function(add_universe_regression NAME HEIGHT COLORS EMPTY CLASSES UNSOLVABLE)
         add_test(NAME ${NAME}
             COMMAND water-universe

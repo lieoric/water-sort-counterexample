@@ -133,6 +133,9 @@ under `experiments/`.
   color-run windows augmented by bounded Ito buffer-demand counters.
 - `water-depth-witness`: independent verification of a scalable pair of tight
   states with identical bounded observations and disjoint safe actions.
+- `water-continuous-control`: continuous realization of controlled top-border
+  paths using real forced maximal bulk moves, without rebuilding a canonical
+  physical state.
 - A literal full-state Water BFS with forced bulk moves and locked completed
   columns, used only as a small-instance reference implementation.
 - Exhaustive cross-checks over 1,796 small initial arrangements, plus the
@@ -288,6 +291,14 @@ two visible runs plus demand counters have **zero sampled conflicts** over
 241,349 macro checkpoints and 1,271,582 unit moves. This is a finite-catalog
 candidate controller, not yet a symbolic all-height closure proof. See
 [`31333399467`](https://github.com/lieoric/water-sort-counterexample/actions/runs/31333399467).
+
+The remaining physical-realization gap is handled separately by
+`water-continuous-control`. It keeps the actually reached tight configuration,
+implements Ito's constructive border-removal and retightening steps with
+forced maximal pours, and refuses to source a locked full monochrome stack.
+It then removes every remaining border after the two-exhausted-column frontier
+and verifies the full sorted goal. See [the continuous realization
+argument](docs/continuous-realization.md).
 
 For an unsolvable instance, write and independently check a certificate:
 
