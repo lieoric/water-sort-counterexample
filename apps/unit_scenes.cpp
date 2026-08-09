@@ -536,7 +536,7 @@ int main(int argc, char** argv) try {
         }
     }
 
-    std::array<std::unordered_map<std::string, Aggregate>, 3> scenes;
+    std::array<std::unordered_map<std::string, Aggregate>, 4> scenes;
     Totals totals;
     std::filesystem::create_directories(options.out);
     std::ofstream occurrences(options.out / "exception_occurrences.tsv");
@@ -586,7 +586,7 @@ int main(int argc, char** argv) try {
                     physical, model.table.safe_columns[state_id], model.instance.height);
                 const auto witness = controller.id + ":m" +
                     std::to_string(model.index) + ":s" + std::to_string(state_id) + ":I";
-                for (std::uint32_t window = 2; window <= 4; ++window) {
+                for (std::uint32_t window = 2; window <= 5; ++window) {
                     add_scene(scenes[window - 2],
                               unit_scene(physical, mixed, window, false, source,
                                          model.instance.color_count, model.instance.height),
@@ -610,7 +610,7 @@ int main(int argc, char** argv) try {
                     const auto active_witness = controller.id + ":m" +
                         std::to_string(model.index) + ":s" + std::to_string(state_id) +
                         ":A" + std::to_string(step);
-                    for (std::uint32_t window = 2; window <= 4; ++window) {
+                    for (std::uint32_t window = 2; window <= 5; ++window) {
                         add_scene(scenes[window - 2],
                                   unit_scene(physical, mixed, window, true, source,
                                              model.instance.color_count,
@@ -660,8 +660,8 @@ int main(int argc, char** argv) try {
         if (count != 0) ++witnessed_exceptions;
     }
 
-    std::array<std::size_t, 3> conflicts{};
-    for (std::uint32_t window = 2; window <= 4; ++window) {
+    std::array<std::size_t, 4> conflicts{};
+    for (std::uint32_t window = 2; window <= 5; ++window) {
         write_scenes(options.out, window, scenes[window - 2]);
         conflicts[window - 2] = static_cast<std::size_t>(std::count_if(
             scenes[window - 2].begin(), scenes[window - 2].end(),
@@ -684,15 +684,18 @@ int main(int argc, char** argv) try {
            << "  \"scenes_w2\": " << scenes[0].size() << ",\n"
            << "  \"scenes_w3\": " << scenes[1].size() << ",\n"
            << "  \"scenes_w4\": " << scenes[2].size() << ",\n"
+           << "  \"scenes_w5\": " << scenes[3].size() << ",\n"
            << "  \"conflicts_w2\": " << conflicts[0] << ",\n"
            << "  \"conflicts_w3\": " << conflicts[1] << ",\n"
-           << "  \"conflicts_w4\": " << conflicts[2] << "\n"
+           << "  \"conflicts_w4\": " << conflicts[2] << ",\n"
+           << "  \"conflicts_w5\": " << conflicts[3] << "\n"
            << "}\n";
     std::cout << "models=" << models.size() << " macros=" << totals.macro_states
               << " unit_moves=" << totals.unit_moves
               << " exceptions=" << witnessed_exceptions << '/'
               << exception_signatures.size() << " conflicts=" << conflicts[0]
-              << ',' << conflicts[1] << ',' << conflicts[2] << '\n';
+              << ',' << conflicts[1] << ',' << conflicts[2] << ','
+              << conflicts[3] << '\n';
     return 0;
 } catch (const std::exception& error) {
     std::cerr << "error: " << error.what() << '\n';

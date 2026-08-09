@@ -73,23 +73,26 @@ def project_scene(signature: str, window: int) -> str:
     return phase + "|" + "/".join(columns)
 
 
-def write_w3_refinements(output: Path, by_window: dict[int, dict]) -> tuple[int, int]:
+def write_refinements(
+    output: Path, by_window: dict[int, dict], parent_window: int
+) -> tuple[int, int]:
     parents = {
         signature
-        for signature, scene in by_window[3].items()
+        for signature, scene in by_window[parent_window].items()
         if scene["common"] == 0
     }
     refinements = []
-    for signature, scene in by_window[4].items():
-        parent = project_scene(signature, 3)
+    child_window = parent_window + 1
+    for signature, scene in by_window[child_window].items():
+        parent = project_scene(signature, parent_window)
         if parent in parents:
             refinements.append((parent, signature, scene))
-    with (output / "w3-conflict-refinements-w4.tsv").open(
+    with (output / f"w{parent_window}-conflict-refinements-w{child_window}.tsv").open(
         "w", encoding="utf-8"
     ) as target:
         target.write(
-            "parent_w3\toccurrences\tcommon_safe\tobserved_safe\twitnesses\t"
-            "signature_w4\n"
+            f"parent_w{parent_window}\toccurrences\tcommon_safe\tobserved_safe\t"
+            f"witnesses\tsignature_w{child_window}\n"
         )
         for parent, signature, scene in sorted(refinements):
             target.write(
@@ -110,7 +113,7 @@ def main() -> None:
     args = parser.parse_args()
 
     reports = []
-    by_window = {2: {}, 3: {}, 4: {}}
+    by_window = {2: {}, 3: {}, 4: {}, 5: {}}
     exception_counts: dict[str, int] = {}
     occurrence_rows = []
     for report_path in sorted(args.input.rglob("report.json")):
@@ -163,9 +166,10 @@ def main() -> None:
         window: write_scenes(args.output, window, scenes)
         for window, scenes in by_window.items()
     }
-    w3_refinements, w3_refinement_conflicts = write_w3_refinements(
-        args.output, by_window
-    )
+    refinements = {
+        window: write_refinements(args.output, by_window, window)
+        for window in (3, 4)
+    }
     with (args.output / "exception_coverage.tsv").open(
         "w", encoding="utf-8"
     ) as output:
@@ -202,11 +206,15 @@ def main() -> None:
         "scenes_w2": len(by_window[2]),
         "scenes_w3": len(by_window[3]),
         "scenes_w4": len(by_window[4]),
+        "scenes_w5": len(by_window[5]),
         "conflicts_w2": conflicts[2],
         "conflicts_w3": conflicts[3],
         "conflicts_w4": conflicts[4],
-        "w3_conflict_refinements_w4": w3_refinements,
-        "w3_conflict_refinement_conflicts_w4": w3_refinement_conflicts,
+        "conflicts_w5": conflicts[5],
+        "w3_conflict_refinements_w4": refinements[3][0],
+        "w3_conflict_refinement_conflicts_w4": refinements[3][1],
+        "w4_conflict_refinements_w5": refinements[4][0],
+        "w4_conflict_refinement_conflicts_w5": refinements[4][1],
         "macro_local_unit_traces": True,
         "continuous_physical_controller_proved": False,
     }
@@ -229,9 +237,13 @@ def main() -> None:
 - Window 2: {totals['scenes_w2']} scenes, **{totals['conflicts_w2']} conflicts**
 - Window 3: {totals['scenes_w3']} scenes, **{totals['conflicts_w3']} conflicts**
 - Window 4: {totals['scenes_w4']} scenes, **{totals['conflicts_w4']} conflicts**
+- Window 5: {totals['scenes_w5']} scenes, **{totals['conflicts_w5']} conflicts**
 - The {totals['conflicts_w3']} ambiguous window-3 scenes split into
   {totals['w3_conflict_refinements_w4']} window-4 refinements, with
   **{totals['w3_conflict_refinement_conflicts_w4']} remaining conflicts**
+- The {totals['conflicts_w4']} ambiguous window-4 scenes split into
+  {totals['w4_conflict_refinements_w5']} window-5 refinements, with
+  **{totals['w4_conflict_refinement_conflicts_w5']} remaining conflicts**
 
 Every selected border removal is expanded into legal one-item moves from a
 canonical tight representative. The representative is rebuilt at the next
