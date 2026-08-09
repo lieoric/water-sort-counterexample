@@ -81,13 +81,39 @@ This remains randomized finite-catalog synthesis:
 The full sampled controller can be represented more compactly by first trying
 a deterministic local rule and storing a table only where that rule must be
 overridden. The current best baseline selects the last legal source in
-canonical column order. On the 3,501 sampled initial instances, it reaches the
-frontier after adding 115 exception signatures; every resulting trajectory is
-then replayed from scratch.
+canonical column order. On the 3,501 sampled initial instances, two independent
+controllers each reach the frontier with 114 exception signatures. Their stable
+intersection has 109 signatures and their union has 119; every resulting
+trajectory is replayed from scratch.
 
 This is a useful conjecture generator: exceptions can be grouped into a small
 number of deficient/hosted and visible-column shapes. It is not a proof that
 only those exceptions exist at untested heights.
+
+## Expanding a border action into one-item moves
+
+`water-unit-scenes` tests whether the macro controller also suggests a small
+finite program at the physical move level. At each controlled top-border state
+it constructs a deterministic tight configuration from the exact `F_c` totals.
+A chosen safe border action is then expanded into legal one-item moves, keeping
+the source fixed until its current top-color run is gone.
+
+Every intermediate state is recorded at three observation windows: the top 2,
+3, and 4 items of every labeled stack. The signature also records whether each
+stack has an unresolved original boundary below the visible items, whether it
+is empty, partial, full, or locked, and whether a source is already active. For
+equal signatures, the analyzer intersects all exact safe unit actions.
+
+- A conflict at window `d` proves that this particular `d`-item scene summary
+  cannot choose one action for all sampled occurrences.
+- No conflict supplies a candidate finite rule for the sampled macro-local
+  traces; it is not by itself a universal proof.
+
+The scope limitation is explicit. After one original border is removed, the
+next macro checkpoint is rebuilt as a canonical tight representative rather
+than reached by a continuous physical rearrangement. The report counts every
+such `retightening_gap`. Closing those gaps, and proving closure over arbitrary
+hidden suffixes, are separate proof obligations.
 
 ## Local use
 
@@ -133,6 +159,19 @@ Compress the same controller around a finite default rule:
   --out out/compressed
 ```
 
+Compare top-item windows 2, 3, and 4 on one or more compressed policies:
+
+```bash
+./build/water-unit-scenes \
+  --catalog merged/instances.tsv \
+  --policy compressed-0/policy.tsv \
+  --policy compressed-1/policy.tsv \
+  --goal-exhausted 2 \
+  --out out/unit-scenes
+```
+
 The `Attack c4 k2 frontier policy` workflow collects exact observations and
 the `Synthesize c4 k2 controlled policy` workflow launches independent
-controlled-policy attempts over the resulting catalog.
+controlled-policy attempts over the resulting catalog. `Analyze c4 k2 unit
+scenes` expands both compressed last-rule controllers and merges their unit
+scene intersections over parallel catalog shards.

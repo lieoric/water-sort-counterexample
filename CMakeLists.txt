@@ -62,6 +62,9 @@ target_link_libraries(water-policy-learn PRIVATE water_sort)
 add_executable(water-policy-control apps/policy_control.cpp)
 target_link_libraries(water-policy-control PRIVATE water_sort)
 
+add_executable(water-unit-scenes apps/unit_scenes.cpp)
+target_link_libraries(water-unit-scenes PRIVATE water_sort)
+
 include(CTest)
 if(BUILD_TESTING)
     add_executable(water-sort-tests tests/test_main.cpp)
@@ -143,6 +146,13 @@ if(BUILD_TESTING)
             --repair-passes 16
             --seed 1
             --out ${CMAKE_CURRENT_BINARY_DIR}/test-policy-compression-output)
+    add_test(NAME water-unit-scenes-smoke
+        COMMAND water-unit-scenes
+            --catalog ${CMAKE_CURRENT_SOURCE_DIR}/tests/data/policy-catalog.tsv
+            --policy ${CMAKE_CURRENT_SOURCE_DIR}/tests/data/empty-policy.tsv
+            --goal-exhausted 2
+            --max-instances 2
+            --out ${CMAKE_CURRENT_BINARY_DIR}/test-unit-scenes-output)
     function(add_universe_regression NAME HEIGHT COLORS EMPTY CLASSES UNSOLVABLE)
         add_test(NAME ${NAME}
             COMMAND water-universe

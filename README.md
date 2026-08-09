@@ -128,6 +128,8 @@ under `experiments/`.
 - `water-policy-control`: randomized synthesis of one shared thin-layer
   controller over an exact catalog, checking only the states induced by that
   controller.
+- `water-unit-scenes`: expansion of controlled border choices into one-item
+  moves, comparing finite top-item observation windows 2, 3, and 4.
 - A literal full-state Water BFS with forced bulk moves and locked completed
   columns, used only as a small-instance reference implementation.
 - Exhaustive cross-checks over 1,796 small initial arrangements, plus the
@@ -243,10 +245,29 @@ exceptions:
 ```
 
 Here `last` means the last currently legal source in the canonical column
-order. On the 3,501-instance catalog, this default needs only 115 sampled
-exceptions instead of a rule for every observed signature. The `Compress c4
-k2 controlled policy` workflow compares several such defaults and measures
-whether their exception sets remain stable across independent seeds.
+order. On the 3,501-instance catalog, two successful attempts each need 114
+sampled exceptions instead of a rule for every observed signature; their union
+contains 119. The `Compress c4 k2 controlled policy` workflow compares several
+such defaults and measures whether their exception sets remain stable across
+independent seeds.
+
+Expand those macro choices into one-item moves and compare observation windows:
+
+```bash
+./build/water-unit-scenes \
+  --catalog out/all-heights/instances.tsv \
+  --policy out/compressed-0/policy.tsv \
+  --policy out/compressed-1/policy.tsv \
+  --goal-exhausted 2 \
+  --out out/unit-scenes
+```
+
+The unit-scene report intersects safe next moves for equal labeled-stack
+signatures at windows 2, 3, and 4. Each border action is physically valid and
+is expanded completely, but the next macro state is rebuilt in canonical tight
+form. Thus this diagnoses a candidate small finite program while explicitly
+counting the still-unproved connections between macro traces. See [the
+thin-layer policy design](docs/thin-layer-policy-learning.md).
 
 For an unsolvable instance, write and independently check a certificate:
 

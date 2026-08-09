@@ -1,0 +1,142 @@
+name: Analyze c4 k2 unit scenes
+run-name: Expand controlled border choices into unit moves
+
+on:
+  # Bootstrap this research workflow before the draft PR reaches main.
+  push:
+    branches: [agent/minimum-height-five]
+    paths: [.github/workflows/c4-unit-scenes.yml]
+  workflow_dispatch:
+    inputs:
+      catalog_run:
+        description: Frontier-policy run containing the merged catalog
+        required: true
+        default: "31328370710"
+        type: string
+      policy_run:
+        description: Compression run containing both last-rule policies
+        required: true
+        default: "31330119149"
+        type: string
+      shards:
+        description: Parallel catalog shards
+        required: true
+        default: "8"
+        type: choice
+        options: ["4", "8", "16"]
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: c4-k2-unit-scenes-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+      shards: ${{ steps.matrix.outputs.shards }}
+    steps:
+      - uses: actions/checkout@v5
+      - name: Build shard matrix
+        id: matrix
+        env:
+          SHARDS: ${{ inputs.shards || '8' }}
+        run: |
+          matrix=$(jq -cn --argjson count "$SHARDS" '[range(0; $count)]')
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+          echo "shards=$SHARDS" >> "$GITHUB_OUTPUT"
+      - name: Download exact sampled catalog
+        uses: actions/download-artifact@v6
+        with:
+          name: frontier-merged-all-heights
+          path: source/catalog
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.catalog_run || '31328370710' }}
+      - name: Download both compressed last-rule policies
+        uses: actions/download-artifact@v6
+        with:
+          pattern: compression-last-*
+          path: source/policies
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.policy_run || '31330119149' }}
+      - name: Build, test, and bundle exact inputs
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DWSC_WARNINGS_AS_ERRORS=ON
+          cmake --build build --parallel 2
+          ctest --test-dir build --output-on-failure
+          test -s source/catalog/instances.tsv
+          mapfile -t policies < <(find source/policies -name policy.tsv -type f | sort)
+          test "${#policies[@]}" -eq 2
+          mkdir -p bundle/policies
+          cp build/water-unit-scenes bundle/
+          cp source/catalog/instances.tsv bundle/
+          cp "${policies[0]}" bundle/policies/p0.tsv
+          cp "${policies[1]}" bundle/policies/p1.tsv
+          tar -czf unit-scene-inputs.tar.gz bundle
+      - uses: actions/upload-artifact@v6
+        with:
+          name: unit-scene-inputs
+          path: unit-scene-inputs.tar.gz
+          retention-days: 7
+
+  analyze:
+    needs: prepare
+    name: shard ${{ matrix.shard }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      max-parallel: 16
+      matrix:
+        shard: ${{ fromJSON(needs.prepare.outputs.matrix) }}
+    steps:
+      - uses: actions/download-artifact@v6
+        with:
+          name: unit-scene-inputs
+      - run: tar -xzf unit-scene-inputs.tar.gz
+      - name: Replay controllers and expand every border choice
+        run: |
+          bundle/water-unit-scenes \
+            --catalog bundle/instances.tsv \
+            --policy bundle/policies/p0.tsv \
+            --policy bundle/policies/p1.tsv \
+            --goal-exhausted 2 \
+            --shard "${{ matrix.shard }}" \
+            --shards "${{ needs.prepare.outputs.shards }}" \
+            --out "out/shard-${{ matrix.shard }}"
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: unit-scenes-${{ matrix.shard }}
+          path: out/shard-${{ matrix.shard }}/
+          if-no-files-found: error
+          retention-days: 30
+
+  merge:
+    needs: [prepare, analyze]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v6
+        with:
+          pattern: unit-scenes-*
+          path: collected
+      - name: Merge scene intersections across every shard
+        run: |
+          python3 scripts/merge_unit_scene_reports.py \
+            --input collected \
+            --output merged \
+            --expected-shards "${{ needs.prepare.outputs.shards }}" \
+            --expect-exceptions 119
+          cat merged/summary.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v6
+        with:
+          name: unit-scenes-merged
+          path: merged/
+          retention-days: 30
