@@ -1,0 +1,6 @@
+id	shard	borders	top_border_states	reachable_states	terminal_states
+ce-000	0	58	304920	440	60
+ce-004	4	58	312312	784	79
+ce-005	5	67	591360	804	79
+ce-006	6	70	752640	3277	271
+ce-007	7	64	491400	438	48

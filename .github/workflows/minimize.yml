@@ -1,0 +1,84 @@
+name: Minimize verified counterexamples
+
+on:
+  workflow_dispatch:
+    inputs:
+      seconds:
+        description: Search seconds per restart
+        required: true
+        default: "900"
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: minimize-counterexamples-${{ github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Build and test once
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DWSC_WARNINGS_AS_ERRORS=ON
+          cmake --build build --parallel 2
+          ctest --test-dir build --output-on-failure
+          mkdir tools
+          cp build/water-minimize build/water-verify tools/
+          tar -czf water-tools.tar.gz tools
+      - uses: actions/upload-artifact@v6
+        with:
+          name: minimizer-tools
+          path: water-tools.tar.gz
+          retention-days: 7
+
+  minimize:
+    needs: prepare
+    name: ${{ matrix.instance }} restart ${{ matrix.restart }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      max-parallel: 20
+      matrix:
+        instance: [ce-000, ce-004, ce-005, ce-006, ce-007]
+        restart: [0, 1, 2, 3]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v6
+        with:
+          name: minimizer-tools
+      - run: tar -xzf water-tools.tar.gz
+      - name: Minimize inside the NO component
+        run: |
+          tools/water-minimize \
+            --input "counterexamples/${{ matrix.instance }}.txt" \
+            --seconds "${{ inputs.seconds }}" \
+            --seed "${{ github.run_id }}" \
+            --shard "${{ matrix.restart }}" \
+            --out "out/${{ matrix.instance }}-r${{ matrix.restart }}"
+      - name: Independently verify the minimized result
+        run: |
+          tools/water-verify \
+            --input "out/${{ matrix.instance }}-r${{ matrix.restart }}/minimized.txt" \
+            --certificate "out/${{ matrix.instance }}-r${{ matrix.restart }}/minimized.wscert"
+      - name: Add result to summary
+        if: always()
+        run: |
+          report="out/${{ matrix.instance }}-r${{ matrix.restart }}/report.json"
+          if test -f "$report"; then
+            echo "### ${{ matrix.instance }} restart ${{ matrix.restart }}" >> "$GITHUB_STEP_SUMMARY"
+            echo '```json' >> "$GITHUB_STEP_SUMMARY"
+            cat "$report" >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: minimized-${{ matrix.instance }}-r${{ matrix.restart }}
+          path: out/${{ matrix.instance }}-r${{ matrix.restart }}/
+          if-no-files-found: error
+          retention-days: 30

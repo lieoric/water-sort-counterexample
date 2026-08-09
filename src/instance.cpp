@@ -4,6 +4,7 @@
 #include <array>
 #include <cctype>
 #include <fstream>
+#include <numeric>
 #include <sstream>
 #include <stdexcept>
 
@@ -152,6 +153,57 @@ std::uint64_t instance_fingerprint(const Instance& instance) {
     for (unsigned shift = 0; shift < 32; shift += 8) mutable_mix(static_cast<std::uint8_t>(instance.empty_columns >> shift));
     for (const auto& column : instance.columns) {
         for (const auto color : column) mutable_mix(color);
+    }
+    return hash;
+}
+
+Instance canonicalize_instance(const Instance& instance) {
+    instance.validate();
+    if (instance.color_count > 8) {
+        throw std::runtime_error("exact color canonicalization is limited to at most 8 colors");
+    }
+
+    std::vector<Color> permutation(instance.color_count);
+    std::iota(permutation.begin(), permutation.end(), static_cast<Color>(0));
+    std::vector<std::vector<Color>> best_columns;
+    bool have_best = false;
+    do {
+        std::vector<std::vector<Color>> columns = instance.columns;
+        for (auto& column : columns) {
+            for (auto& color : column) {
+                color = permutation[color];
+            }
+        }
+        std::sort(columns.begin(), columns.end());
+        if (!have_best || columns < best_columns) {
+            best_columns = std::move(columns);
+            have_best = true;
+        }
+    } while (std::next_permutation(permutation.begin(), permutation.end()));
+
+    return Instance{instance.height, instance.color_count, instance.empty_columns,
+                    std::move(best_columns)};
+}
+
+std::string canonical_encoding(const Instance& instance) {
+    const auto canonical = canonicalize_instance(instance);
+    std::ostringstream output;
+    output << canonical.height << ':' << canonical.color_count << ':'
+           << canonical.empty_columns << ':';
+    for (std::size_t column = 0; column < canonical.columns.size(); ++column) {
+        if (column != 0) output << '|';
+        for (const auto color : canonical.columns[column]) {
+            output << color_to_char(color);
+        }
+    }
+    return output.str();
+}
+
+std::uint64_t canonical_fingerprint(const Instance& instance) {
+    std::uint64_t hash = 1469598103934665603ULL;
+    for (const unsigned char byte : canonical_encoding(instance)) {
+        hash ^= byte;
+        hash *= 1099511628211ULL;
     }
     return hash;
 }

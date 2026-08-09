@@ -21,6 +21,9 @@ struct Instance {
 Instance read_instance(const std::filesystem::path& path);
 void write_instance(const Instance& instance, const std::filesystem::path& path);
 std::uint64_t instance_fingerprint(const Instance& instance);
+Instance canonicalize_instance(const Instance& instance);
+std::string canonical_encoding(const Instance& instance);
+std::uint64_t canonical_fingerprint(const Instance& instance);
 
 char color_to_char(Color color);
 Color char_to_color(char value);

@@ -41,9 +41,17 @@ target_link_libraries(water-verify PRIVATE water_sort)
 add_executable(water-hunter apps/hunter.cpp)
 target_link_libraries(water-hunter PRIVATE water_sort)
 
+add_executable(water-neighborhood apps/neighborhood.cpp)
+target_link_libraries(water-neighborhood PRIVATE water_sort)
+
+add_executable(water-minimize apps/minimize.cpp)
+target_link_libraries(water-minimize PRIVATE water_sort)
+
 include(CTest)
 if(BUILD_TESTING)
     add_executable(water-sort-tests tests/test_main.cpp)
     target_link_libraries(water-sort-tests PRIVATE water_sort)
+    target_compile_definitions(water-sort-tests PRIVATE
+        WSC_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
     add_test(NAME water-sort-tests COMMAND water-sort-tests)
 endif()

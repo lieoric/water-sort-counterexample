@@ -4,6 +4,7 @@
 #include "water_sort/water_solver.hpp"
 
 #include <cstdint>
+#include <algorithm>
 #include <filesystem>
 #include <functional>
 #include <iostream>
@@ -96,6 +97,43 @@ void run_tests() {
         std::filesystem::remove(certificate);
         require(verification.valid && verification.marked_states > 0,
                 "NO certificate verification failed");
+    }
+
+    {
+        const auto corpus = std::filesystem::path(WSC_SOURCE_DIR) / "counterexamples";
+        const std::vector<std::string> ids{"000", "004", "005", "006", "007"};
+        for (const auto& id : ids) {
+            const auto path = corpus / ("ce-" + id + ".txt");
+            const auto certificate = corpus / ("ce-" + id + ".wscert");
+            auto instance = water_sort::read_instance(path);
+            const auto oracle = water_sort::BorderOracle(instance);
+            require(!oracle.solve().solvable, "committed counterexample unexpectedly solved");
+            require(water_sort::verify_no_certificate(instance, certificate).valid,
+                    "committed counterexample certificate failed verification");
+            instance.empty_columns = 3;
+            require(water_sort::BorderOracle(instance).solve().solvable,
+                    "committed counterexample did not solve with a third empty column");
+        }
+
+        auto original = water_sort::read_instance(corpus / "ce-000.txt");
+        auto symmetric = original;
+        std::reverse(symmetric.columns.begin(), symmetric.columns.end());
+        for (auto& column : symmetric.columns) {
+            for (auto& color : column) color = static_cast<water_sort::Color>(4 - color);
+        }
+        require(water_sort::canonical_encoding(original) ==
+                    water_sort::canonical_encoding(symmetric),
+                "canonicalization failed to remove color and column symmetries");
+
+        const auto analysis = water_sort::BorderOracle(original).analyze();
+        require(!analysis.solvable && analysis.reachable_states == 440 &&
+                    analysis.terminal_states == 60 && analysis.min_terminal_depth == 4 &&
+                    analysis.max_terminal_depth == 12,
+                "unexpected analysis metrics for ce-000");
+        require(analysis.signatures.size() == 1 &&
+                    analysis.signatures.begin()->first.compact() == "a2-d2-h3-n3,3,3,3,3" &&
+                    analysis.signatures.begin()->second == 60,
+                "unexpected deadlock signature for ce-000");
     }
 
     std::uint64_t exhaustive_cases = 0;

@@ -23,6 +23,9 @@ struct Options {
     std::uint64_t seconds = 60;
     std::uint64_t iterations = 0;
     std::uint64_t solution_cap = 10000;
+    std::uint32_t height = 16;
+    std::uint32_t colors = 5;
+    std::uint32_t empty_columns = 2;
     std::filesystem::path out = "out";
 };
 
@@ -41,33 +44,36 @@ bool better(const Evaluation& left, const Evaluation& right, std::uint64_t cap) 
     return false;
 }
 
-water_sort::Instance random_instance(std::mt19937_64& rng) {
+water_sort::Instance random_instance(const Options& options, std::mt19937_64& rng) {
     water_sort::Instance instance;
-    instance.height = 16;
-    instance.color_count = 5;
-    instance.empty_columns = 2;
+    instance.height = options.height;
+    instance.color_count = options.colors;
+    instance.empty_columns = options.empty_columns;
     std::vector<water_sort::Color> items;
-    items.reserve(80);
-    for (water_sort::Color color = 0; color < 5; ++color) {
-        items.insert(items.end(), 16, color);
+    items.reserve(static_cast<std::size_t>(options.height) * options.colors);
+    for (water_sort::Color color = 0; color < options.colors; ++color) {
+        items.insert(items.end(), options.height, color);
     }
     std::shuffle(items.begin(), items.end(), rng);
-    for (std::size_t column = 0; column < 5; ++column) {
-        const auto first = items.begin() + static_cast<std::ptrdiff_t>(column * 16);
-        instance.columns.emplace_back(first, first + 16);
+    for (std::size_t column = 0; column < options.colors; ++column) {
+        const auto first = items.begin() +
+            static_cast<std::ptrdiff_t>(column * options.height);
+        instance.columns.emplace_back(first, first + options.height);
     }
     return instance;
 }
 
 void mutate(water_sort::Instance& instance, std::mt19937_64& rng) {
-    std::uniform_int_distribution<std::size_t> position(0, 79);
+    const auto cell_count = instance.columns.size() * instance.height;
+    std::uniform_int_distribution<std::size_t> position(0, cell_count - 1);
     auto first = position(rng);
     auto second = position(rng);
-    auto& a = instance.columns[first / 16][first % 16];
-    while (second == first || instance.columns[second / 16][second % 16] == a) {
+    auto& a = instance.columns[first / instance.height][first % instance.height];
+    while (second == first ||
+           instance.columns[second / instance.height][second % instance.height] == a) {
         second = position(rng);
     }
-    std::swap(a, instance.columns[second / 16][second % 16]);
+    std::swap(a, instance.columns[second / instance.height][second % instance.height]);
 }
 
 Evaluation evaluate(const water_sort::Instance& instance, std::uint64_t cap) {
@@ -88,6 +94,9 @@ void write_report(const Options& options,
            << "  \"seed\": " << effective_seed << ",\n"
            << "  \"iterations\": " << iterations << ",\n"
            << "  \"solution_cap\": " << options.solution_cap << ",\n"
+           << "  \"height\": " << options.height << ",\n"
+           << "  \"colors\": " << options.colors << ",\n"
+           << "  \"empty_columns\": " << options.empty_columns << ",\n"
            << "  \"best_border_sequences\": " << best.solutions << ",\n"
            << "  \"best_states_evaluated\": " << best.states << ",\n"
            << "  \"counterexample_found\": " << (found ? "true" : "false") << "\n"
@@ -110,14 +119,23 @@ Options parse_options(int argc, char** argv) {
         else if (argument == "--seconds") options.seconds = std::stoull(value());
         else if (argument == "--iterations") options.iterations = std::stoull(value());
         else if (argument == "--solution-cap") options.solution_cap = std::stoull(value());
+        else if (argument == "--height") {
+            options.height = static_cast<std::uint32_t>(std::stoul(value()));
+        } else if (argument == "--colors") {
+            options.colors = static_cast<std::uint32_t>(std::stoul(value()));
+        } else if (argument == "--empty") {
+            options.empty_columns = static_cast<std::uint32_t>(std::stoul(value()));
+        }
         else if (argument == "--out") options.out = value();
         else if (argument == "--help") {
             std::cout << "water-hunter [--seed N] [--shard I --shards N] [--seconds N] "
-                         "[--iterations N] [--solution-cap N] [--out DIR]\n";
+                         "[--iterations N] [--solution-cap N] [--height H] [--colors N] "
+                         "[--empty K] [--out DIR]\n";
             std::exit(0);
         } else throw std::runtime_error("unknown argument: " + argument);
     }
     if (options.shards == 0 || options.shard >= options.shards || options.solution_cap == 0 ||
+        options.height == 0 || options.colors == 0 || options.colors > 36 ||
         (options.seconds == 0 && options.iterations == 0)) {
         throw std::runtime_error("invalid hunter options");
     }
@@ -132,7 +150,7 @@ int main(int argc, char** argv) try {
     const auto effective_seed = options.seed +
         0x9e3779b97f4a7c15ULL * static_cast<std::uint64_t>(options.shard + 1);
     std::mt19937_64 rng(effective_seed);
-    auto current = random_instance(rng);
+    auto current = random_instance(options, rng);
     auto current_eval = evaluate(current, options.solution_cap);
     auto best = current;
     auto best_eval = current_eval;
@@ -182,7 +200,7 @@ int main(int argc, char** argv) try {
             write_report(options, effective_seed, iteration, best_eval, false);
         }
         if (iteration % 2000 == 0) {
-            current = random_instance(rng);
+            current = random_instance(options, rng);
             current_eval = evaluate(current, options.solution_cap);
         }
     }
