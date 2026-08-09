@@ -1,0 +1,208 @@
+name: Attack c4 k2 frontier policy
+run-name: Frontier d${{ inputs.depth || '3' }} across h=${{ inputs.heights || '4,5,6,7,8,9,12,16' }}
+
+on:
+  # Bootstrap this research workflow before the draft PR reaches main.
+  push:
+    branches: [agent/minimum-height-five]
+    paths: [.github/workflows/c4-frontier-policy.yml]
+  workflow_dispatch:
+    inputs:
+      heights:
+        description: Comma-separated heights
+        required: true
+        default: "4,5,6,7,8,9,12,16"
+        type: string
+      depth:
+        description: Visible boundary depth
+        required: true
+        default: "3"
+        type: choice
+        options: ["2", "3", "4"]
+      shards:
+        description: Shards per height
+        required: true
+        default: "4"
+        type: choice
+        options: ["1", "2", "4", "8"]
+      bases_per_shard:
+        description: Independent random bases per shard
+        required: true
+        default: "40"
+        type: string
+      tail_mutations:
+        description: Hidden-tail variants per base
+        required: true
+        default: "3"
+        type: string
+      tail_swaps:
+        description: Deep item swaps per variant
+        required: true
+        default: "3"
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: c4-k2-frontier-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      heights: ${{ steps.matrix.outputs.heights }}
+      shards: ${{ steps.matrix.outputs.shards }}
+      reports: ${{ steps.matrix.outputs.reports }}
+    steps:
+      - uses: actions/checkout@v5
+      - name: Build matrices
+        id: matrix
+        env:
+          HEIGHTS: ${{ inputs.heights || '4,5,6,7,8,9,12,16' }}
+          SHARD_COUNT: ${{ inputs.shards || '4' }}
+        run: |
+          heights=$(jq -cn --arg raw "$HEIGHTS" '$raw | split(",") | map(gsub(" "; "") | tonumber)')
+          shards=$(jq -cn --argjson count "$SHARD_COUNT" '[range(0; $count)]')
+          height_count=$(jq 'length' <<< "$heights")
+          echo "heights=$heights" >> "$GITHUB_OUTPUT"
+          echo "shards=$shards" >> "$GITHUB_OUTPUT"
+          echo "reports=$((height_count * SHARD_COUNT))" >> "$GITHUB_OUTPUT"
+      - name: Build and test once
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DWSC_WARNINGS_AS_ERRORS=ON
+          cmake --build build --parallel 2
+          ctest --test-dir build --output-on-failure
+          mkdir tools
+          cp build/water-policy-learn build/water-verify tools/
+          tar -czf frontier-policy-tools.tar.gz tools
+      - uses: actions/upload-artifact@v6
+        with:
+          name: frontier-policy-tools
+          path: frontier-policy-tools.tar.gz
+          retention-days: 7
+
+  learn:
+    needs: prepare
+    name: h${{ matrix.height }}, shard ${{ matrix.shard }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      max-parallel: 16
+      matrix:
+        height: ${{ fromJSON(needs.prepare.outputs.heights) }}
+        shard: ${{ fromJSON(needs.prepare.outputs.shards) }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v6
+        with:
+          name: frontier-policy-tools
+      - run: tar -xzf frontier-policy-tools.tar.gz
+      - name: Attack the three-boundary frontier policy
+        env:
+          DEPTH: ${{ inputs.depth || '3' }}
+          SHARDS: ${{ inputs.shards || '4' }}
+          BASES: ${{ inputs.bases_per_shard || '40' }}
+          TAIL_MUTATIONS: ${{ inputs.tail_mutations || '3' }}
+          TAIL_SWAPS: ${{ inputs.tail_swaps || '3' }}
+        run: |
+          tools/water-policy-learn \
+            --seed "${{ github.run_id }}" \
+            --shard "${{ matrix.shard }}" \
+            --shards "$SHARDS" \
+            --height "${{ matrix.height }}" \
+            --colors 4 \
+            --empty 2 \
+            --depth "$DEPTH" \
+            --goal-exhausted 2 \
+            --samples "$BASES" \
+            --tail-mutations "$TAIL_MUTATIONS" \
+            --tail-swaps "$TAIL_SWAPS" \
+            --stop-on-no 0 \
+            --out "out/h${{ matrix.height }}-s${{ matrix.shard }}"
+      - name: Verify any frontier-unreachable instance as a full NO
+        if: ${{ hashFiles(format('out/h{0}-s{1}/counterexample.txt', matrix.height, matrix.shard)) != '' }}
+        run: |
+          tools/water-verify \
+            --input "out/h${{ matrix.height }}-s${{ matrix.shard }}/counterexample.txt" \
+            --certificate "out/h${{ matrix.height }}-s${{ matrix.shard }}/counterexample.wscert"
+      - name: Add report to summary
+        if: always()
+        run: |
+          report="out/h${{ matrix.height }}-s${{ matrix.shard }}/report.json"
+          if test -f "$report"; then
+            echo '```json' >> "$GITHUB_STEP_SUMMARY"
+            cat "$report" >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: frontier-h${{ matrix.height }}-s${{ matrix.shard }}
+          path: out/h${{ matrix.height }}-s${{ matrix.shard }}/
+          if-no-files-found: error
+          retention-days: 30
+
+  merge-height:
+    needs: [prepare, learn]
+    name: Merge h${{ matrix.height }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        height: ${{ fromJSON(needs.prepare.outputs.heights) }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v6
+        with:
+          pattern: frontier-h${{ matrix.height }}-s*
+          path: collected
+      - name: Merge one height
+        env:
+          DEPTH: ${{ inputs.depth || '3' }}
+          SHARDS: ${{ inputs.shards || '4' }}
+        run: |
+          python3 scripts/merge_policy_reports.py \
+            --input collected \
+            --output "merged/height-${{ matrix.height }}" \
+            --depth "$DEPTH" \
+            --height "${{ matrix.height }}" \
+            --goal-exhausted 2 \
+            --expected-shards "$SHARDS"
+          cat "merged/height-${{ matrix.height }}/summary.md" >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v6
+        with:
+          name: frontier-merged-h${{ matrix.height }}
+          path: merged/height-${{ matrix.height }}/
+          retention-days: 30
+
+  merge-all-heights:
+    needs: [prepare, learn, merge-height]
+    name: Merge all heights
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v6
+        with:
+          pattern: frontier-h*-s*
+          path: collected
+      - name: Find cross-height conflicts
+        env:
+          DEPTH: ${{ inputs.depth || '3' }}
+          REPORTS: ${{ needs.prepare.outputs.reports }}
+        run: |
+          python3 scripts/merge_policy_reports.py \
+            --input collected \
+            --output merged/all-heights \
+            --depth "$DEPTH" \
+            --goal-exhausted 2 \
+            --expected-shards "$REPORTS"
+          cat merged/all-heights/summary.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v6
+        with:
+          name: frontier-merged-all-heights
+          path: merged/all-heights/
+          retention-days: 30

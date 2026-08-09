@@ -250,26 +250,47 @@ CountResult BorderOracle::count_solutions(std::uint64_t cap) const {
 }
 
 PolicyTable BorderOracle::policy_table() const {
+    return policy_table_impl(static_cast<std::uint32_t>(instance_.columns.size()));
+}
+
+PolicyTable BorderOracle::policy_table_to_exhausted_columns(
+    std::uint32_t target_exhausted_columns) const {
+    if (target_exhausted_columns == 0 ||
+        target_exhausted_columns > instance_.columns.size()) {
+        throw std::runtime_error("exhausted-column target is out of range");
+    }
+    return policy_table_impl(target_exhausted_columns);
+}
+
+PolicyTable BorderOracle::policy_table_impl(
+    std::uint32_t target_exhausted_columns) const {
     if (instance_.columns.size() > 64) {
         throw std::runtime_error("policy masks support at most 64 full columns");
     }
 
     PolicyTable result;
     result.initial_state = initial_state_;
+    result.target_exhausted_columns = target_exhausted_columns;
     result.solvable.assign(state_count_, 0);
     result.reachable.assign(state_count_, 0);
+    result.goal.assign(state_count_, 0);
     result.legal_columns.assign(state_count_, 0);
     result.safe_columns.assign(state_count_, 0);
-    result.solvable[0] = 1;
 
     std::vector<std::uint32_t> ranks(instance_.columns.size());
     std::vector<std::uint32_t> f(instance_.color_count);
     std::vector<std::uint32_t> g(instance_.color_count);
     for (std::uint32_t state = 0; state < state_count_; ++state) {
         ++result.states_evaluated;
-        if (state == 0) continue;
-
         decode(state, ranks);
+        const auto exhausted = static_cast<std::uint32_t>(
+            std::count(ranks.begin(), ranks.end(), 0U));
+        if (exhausted >= target_exhausted_columns) {
+            result.goal[state] = 1;
+            result.solvable[state] = 1;
+            continue;
+        }
+
         std::uint32_t monochrome_bins = 0;
         totals(ranks, f, g, monochrome_bins);
         std::uint64_t legal = 0;
@@ -294,6 +315,7 @@ PolicyTable BorderOracle::policy_table() const {
     queue.push_back(initial_state_);
     for (std::size_t head = 0; head < queue.size(); ++head) {
         const auto state = queue[head];
+        if (result.goal[state] != 0) continue;
         auto legal = result.legal_columns[state];
         while (legal != 0) {
             std::size_t column = 0;

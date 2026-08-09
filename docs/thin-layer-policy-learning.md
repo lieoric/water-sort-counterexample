@@ -32,6 +32,29 @@ A universal theorem additionally needs a symbolic checker proving that every
 possible hidden suffix is covered and that each certified macro rule decreases
 a well-founded measure such as the number of remaining original borders.
 
+## Four-color, two-empty frontier
+
+For four colors and two initially empty columns, it is enough to reach a
+top-border state in which at least two original columns have no borders left.
+If `r` columns are exhausted, Ito's capacity test has `2 + r` monochrome bins.
+Each of the four colors needs at most one such bin, so at `r >= 2` every
+remaining border is removable.
+
+The focused experiment therefore uses `--goal-exhausted 2`. Its safe mask
+means “can still reach two exhausted columns,” rather than “can still reach the
+fully sorted border table.” This removes the already-trivial suffix from the
+proof obligation.
+
+`--tail-mutations N --tail-swaps M` creates related balanced instances by
+protecting the visible top runs and swapping items only in deeper hidden tails.
+The variants make one thin signature encounter different hidden completions
+and are intended to expose action conflicts quickly.
+
+The `Attack c4 k2 frontier policy` workflow merges signatures per height and
+again across every requested height. A cross-height conflict is a finite scene
+summary for which the observed hidden completions share no frontier-winning
+action.
+
 ## Local use
 
 ```bash
@@ -46,6 +69,8 @@ The output directory contains:
 - `report.json`: sample and coverage totals;
 - `signatures.tsv`: one row per canonical scene signature;
 - `conflicts.tsv`: signatures whose observed safe-action intersection is empty;
+- `instances.tsv`: exact initial columns keyed by the fingerprints used in
+  signature witnesses, so a conflict can be reconstructed;
 - `counterexample.txt` and `counterexample.wscert`, if sampling finds a NO
   instance.
 

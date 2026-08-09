@@ -193,6 +193,20 @@ observation depth or signature is insufficient. A nonempty intersection is
 only a candidate rule until it is proved for every possible hidden suffix. See
 [the thin-layer policy design](docs/thin-layer-policy-learning.md).
 
+For the focused four-color/two-empty proof frontier, stop when two original
+columns have no borders and mutate only the hidden tails:
+
+```bash
+./build/water-policy-learn \
+  --colors 4 --height 12 --empty 2 --depth 3 \
+  --goal-exhausted 2 --samples 40 \
+  --tail-mutations 3 --tail-swaps 3 \
+  --out out/frontier-h12
+```
+
+The `Attack c4 k2 frontier policy` workflow runs this experiment across
+several heights and performs a final cross-height signature merge.
+
 For an unsolvable instance, write and independently check a certificate:
 
 ```bash

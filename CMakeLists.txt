@@ -114,6 +114,9 @@ if(BUILD_TESTING)
             --colors 3
             --empty 2
             --depth 2
+            --goal-exhausted 2
+            --tail-mutations 1
+            --tail-swaps 1
             --samples 8
             --seed 1
             --stop-on-no 1

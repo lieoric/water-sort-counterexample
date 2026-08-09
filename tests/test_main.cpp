@@ -100,9 +100,21 @@ void run_tests() {
         const auto instance = make_instance(2, 2, 2, {{0, 1}, {1, 0}});
         const water_sort::BorderOracle oracle(instance);
         const auto policy = oracle.policy_table();
+        const auto frontier = oracle.policy_table_to_exhausted_columns(1);
+        const auto full_target = oracle.policy_table_to_exhausted_columns(2);
         require(policy.initial_state != 0 && policy.solvable[policy.initial_state] != 0 &&
                     policy.safe_columns[policy.initial_state] != 0,
                 "solvable policy table has no safe initial action");
+        require(frontier.target_exhausted_columns == 1 &&
+                    frontier.solvable[frontier.initial_state] != 0 &&
+                    frontier.goal[frontier.initial_state] == 0 &&
+                    frontier.safe_columns[frontier.initial_state] != 0,
+                "frontier policy table did not reach one exhausted column");
+        require(policy.goal.size() == frontier.goal.size() && policy.goal[0] != 0,
+                "full policy table did not mark its terminal goal");
+        require(policy.solvable == full_target.solvable &&
+                    policy.safe_columns == full_target.safe_columns,
+                "explicit full exhausted-column target changed the policy table");
         const auto view = oracle.policy_state(policy.initial_state, 1);
         require(view.columns.size() == 2 && view.columns[0].visible_runs.size() == 2 &&
                     view.columns[1].visible_runs.size() == 2,
@@ -127,6 +139,29 @@ void run_tests() {
         std::filesystem::remove(certificate);
         require(verification.valid && verification.marked_states > 0,
                 "NO certificate verification failed");
+    }
+
+    {
+        const auto instance = make_instance(3, 4, 2, {
+            {0, 1, 2}, {3, 0, 1}, {2, 3, 0}, {1, 2, 3},
+        });
+        const water_sort::BorderOracle oracle(instance);
+        const auto full = oracle.policy_table();
+        for (std::uint32_t state = 0; state < oracle.state_count(); ++state) {
+            const auto view = oracle.policy_state(state, 1);
+            const auto exhausted = static_cast<std::uint32_t>(
+                std::count(view.ranks.begin(), view.ranks.end(), 0U));
+            if (exhausted < 2 ||
+                exhausted == static_cast<std::uint32_t>(view.ranks.size())) {
+                continue;
+            }
+            std::uint64_t remaining = 0;
+            for (std::size_t column = 0; column < view.ranks.size(); ++column) {
+                if (view.ranks[column] != 0) remaining |= std::uint64_t{1} << column;
+            }
+            require(full.legal_columns[state] == remaining,
+                    "c4,k2 state with two exhausted columns has a blocked border");
+        }
     }
 
     {
