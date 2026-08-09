@@ -156,6 +156,23 @@ attack on the proposed observation. A conflict-free finite catalog remains a
 conjecture generator: the eventual proof must establish symbolic closure and
 replace every canonical retightening gap by a continuous construction.
 
+The first combined run replayed two independently synthesized controllers over
+all 4,301 instances. It expanded 241,349 macro checkpoints into 1,271,582 legal
+one-item moves and obtained:
+
+| Visible structure | Run only | Run + bounded demand |
+|---:|---:|---:|
+| Top 1 run | 30 conflicts | 14 conflicts |
+| Top 2 runs | 82 conflicts | **0 conflicts** |
+| Top 3 runs | 4 conflicts | **0 conflicts** |
+| Top 4 runs | 1 conflict | **0 conflicts** |
+
+Thus the smallest counter-augmented observation on this catalog is two visible
+color runs per stack. The non-monotone raw conflict counts are expected: one
+conflicting coarse signature can split into several still-conflicting finer
+signatures. The exact merged artifacts are retained by GitHub Actions run
+[`31333399467`](https://github.com/lieoric/water-sort-counterexample/actions/runs/31333399467).
+
 These are exact intersections for the finite catalog and the chosen canonical
 tight representatives, not an all-height theorem. There are 232,753 explicit
 connections still to replace with continuous physical traces or a general

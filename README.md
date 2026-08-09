@@ -281,6 +281,14 @@ choose a safe action for every possible frontier-winning tight configuration.
 A carefully controlled strategy might still avoid the obstruction family; see
 [the fixed-depth obstruction and its exact scope](docs/no-fixed-item-depth.md).
 
+A follow-up attack replaces item depth by monochrome-run depth and carries the
+bounded Ito buffer-demand state into every unit scene. Across the same 4,301
+instances, two visible runs without counters still have 82 conflicts, while
+two visible runs plus demand counters have **zero sampled conflicts** over
+241,349 macro checkpoints and 1,271,582 unit moves. This is a finite-catalog
+candidate controller, not yet a symbolic all-height closure proof. See
+[`31333399467`](https://github.com/lieoric/water-sort-counterexample/actions/runs/31333399467).
+
 For an unsolvable instance, write and independently check a certificate:
 
 ```bash
