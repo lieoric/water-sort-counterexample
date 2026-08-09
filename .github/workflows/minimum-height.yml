@@ -1,0 +1,147 @@
+name: Scan complete low-height universe
+
+on:
+  workflow_dispatch:
+    inputs:
+      height:
+        description: Tube height (each of the five colors occurs this many times)
+        required: true
+        default: "3"
+        type: string
+      candidate_limit:
+        description: Canonical classes per shard; 0 means unlimited
+        required: true
+        default: "0"
+        type: string
+      shard_columns:
+        description: Completed columns used to split the search tree
+        required: true
+        default: "2"
+        type: string
+      certificate_limit:
+        description: NO certificates saved per shard
+        required: true
+        default: "5"
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: minimum-height-${{ github.ref }}-${{ inputs.height }}
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Build and test once
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DWSC_WARNINGS_AS_ERRORS=ON
+          cmake --build build --parallel 2
+          ctest --test-dir build --output-on-failure
+          mkdir tools
+          cp build/water-universe build/water-verify tools/
+          tar -czf water-tools.tar.gz tools
+      - uses: actions/upload-artifact@v6
+        with:
+          name: minimum-height-tools
+          path: water-tools.tar.gz
+          retention-days: 7
+
+  scan:
+    needs: prepare
+    name: Height ${{ inputs.height }}, shard ${{ matrix.shard }} of 16
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      max-parallel: 16
+      matrix:
+        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v6
+        with:
+          name: minimum-height-tools
+      - name: Extract tools
+        run: tar -xzf water-tools.tar.gz
+      - name: Enumerate canonical initial arrangements
+        run: |
+          tools/water-universe \
+            --height "${{ inputs.height }}" \
+            --colors 5 \
+            --empty 2 \
+            --shard "${{ matrix.shard }}" \
+            --shards 16 \
+            --shard-columns "${{ inputs.shard_columns }}" \
+            --candidate-limit "${{ inputs.candidate_limit }}" \
+            --certificate-limit "${{ inputs.certificate_limit }}" \
+            --out "out/shard-${{ matrix.shard }}"
+      - name: Independently verify saved NO certificates
+        run: |
+          for instance in out/shard-${{ matrix.shard }}/no-*.txt; do
+            test -e "$instance" || continue
+            tools/water-verify \
+              --input "$instance" \
+              --certificate "${instance%.txt}.wscert"
+          done
+      - name: Add report to summary
+        if: always()
+        run: |
+          if test -f "out/shard-${{ matrix.shard }}/report.json"; then
+            echo '```json' >> "$GITHUB_STEP_SUMMARY"
+            cat "out/shard-${{ matrix.shard }}/report.json" >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: minimum-height-${{ inputs.height }}-shard-${{ matrix.shard }}
+          path: out/shard-${{ matrix.shard }}/
+          if-no-files-found: error
+          retention-days: 30
+
+  merge:
+    needs: scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v6
+        with:
+          pattern: minimum-height-${{ inputs.height }}-shard-*
+          path: collected
+      - name: Check completeness and merge canonical classes
+        run: |
+          reports=$(find collected -name report.json -type f | wc -l)
+          test "$reports" -eq 16
+          stopped=$(find collected -name report.json -type f -print0 | \
+            xargs -0 -n1 jq -r '.stopped_early' | grep -c '^true$' || true)
+          test "$stopped" -eq 0
+          mkdir merged
+          printf 'class_id\tresult\theight\tcolors\tempty\tborders\toracle_states\tterminals\tsignatures\tcanonical\n' \
+            > merged/results.tsv
+          find collected -name results.tsv -type f -print0 | sort -z | \
+            while IFS= read -r -d '' file; do tail -n +2 "$file"; done | \
+            LC_ALL=C sort -u >> merged/results.tsv
+          total=$(tail -n +2 merged/results.tsv | wc -l)
+          yes=$(tail -n +2 merged/results.tsv | awk -F '\t' '$2 == "YES" {n++} END {print n+0}')
+          no=$(tail -n +2 merged/results.tsv | awk -F '\t' '$2 == "NO" {n++} END {print n+0}')
+          representations=$(find collected -name report.json -type f -print0 | \
+            xargs -0 -n1 jq -r '.representations' | awk '{n += $1} END {print n+0}')
+          {
+            echo "## Complete low-height universe"
+            echo
+            echo "- Colors / full columns / empty columns: 5 / 5 / 2"
+            echo "- Height and copies per color: ${{ inputs.height }}"
+            echo "- Orderly representations examined: $representations"
+            echo "- Exact symmetry classes: $total"
+            echo "- Solvable: $yes"
+            echo "- Unsolvable: $no"
+            echo "- All shards complete: yes"
+          } | tee merged/summary.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v6
+        with:
+          name: minimum-height-merged-${{ inputs.height }}
+          path: merged/
+          retention-days: 30
