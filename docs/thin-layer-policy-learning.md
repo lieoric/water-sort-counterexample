@@ -98,8 +98,8 @@ it constructs a deterministic tight configuration from the exact `F_c` totals.
 A chosen safe border action is then expanded into legal one-item moves, keeping
 the source fixed until its current top-color run is gone.
 
-Every intermediate state is recorded at three observation windows: the top 2,
-3, and 4 items of every labeled stack. The signature also records whether each
+Every intermediate state is recorded at observation windows 2 through 6. The
+signature also records whether each
 stack has an unresolved original boundary below the visible items, whether it
 is empty, partial, full, or locked, and whether a source is already active. For
 equal signatures, the analyzer intersects all exact safe unit actions.
@@ -117,29 +117,36 @@ hidden suffixes, are separate proof obligations.
 
 ### Current finite-catalog result
 
-The two compressed controllers were expanded over all 3,501 catalog instances
-(heights 4, 5, 6, 7, 8, 9, 12, and 16). The merged run replayed 156,873 macro
-checkpoints and 607,860 legal one-item moves, and witnessed all 119 exception
-signatures from the union of the two macro policies.
+The latest combined experiment contains 4,301 instances across sampled heights
+from 4 through 46. Two compressed controllers were synthesized over the union,
+then expanded through 241,355 macro checkpoints and 1,271,681 legal one-item
+moves. All 159 exception signatures from the two macro policies were witnessed.
 
 | Visible top items | Distinct unit scenes | Conflicts |
 |---:|---:|---:|
-| 2 | 66,503 | 38 |
-| 3 | 151,240 | 5 |
-| 4 | 229,128 | 0 |
+| 2 | 77,180 | 59 |
+| 3 | 196,015 | 35 |
+| 4 | 338,181 | 6 |
+| 5 | 458,821 | 2 |
+| 6 | 555,771 | 0 |
 
-All five window-3 conflicts occur in the idle phase, before choosing the next
-source. They split into only 29 window-4 refinements, each with a nonempty
-common safe action. This supports a compact layered candidate: inspect three
-items normally and consult the fourth item only for five ambiguous three-item
-patterns. It is materially smaller than treating all 229,128 window-4 scenes
-as unrelated rules.
+The two window-5 conflicts split into six window-6 refinements, all with a
+nonempty common safe action. Thus the minimum for this finite combined catalog
+is `D = 6`. Smaller catalogs gave minima 4 and 5; the minimum increased when
+hidden-tail completions from different height ranges were required to share
+one controller.
 
 These are exact intersections for the finite catalog and the chosen canonical
-tight representatives, not an all-height theorem. There are 149,871 explicit
+tight representatives, not an all-height theorem. There are 232,753 explicit
 connections still to replace with continuous physical traces or a general
 retightening lemma. The complete result is retained by GitHub Actions run
-[`31331083596`](https://github.com/lieoric/water-sort-counterexample/actions/runs/31331083596).
+[`31332086070`](https://github.com/lieoric/water-sort-counterexample/actions/runs/31332086070).
+
+Moreover, a scaling argument applied to a committed obstruction pair proves
+that no height-independent fixed number of visible top items can select a safe
+move for **every** frontier-winning tight configuration. This does not rule out
+a strategy that maintains a stronger invariant and visits only a restricted
+subset. See [the fixed-depth obstruction](no-fixed-item-depth.md).
 
 ## Local use
 
@@ -185,7 +192,7 @@ Compress the same controller around a finite default rule:
   --out out/compressed
 ```
 
-Compare top-item windows 2, 3, and 4 on one or more compressed policies:
+Compare top-item windows 2 through 6 on one or more compressed policies:
 
 ```bash
 ./build/water-unit-scenes \

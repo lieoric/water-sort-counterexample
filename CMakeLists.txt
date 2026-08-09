@@ -65,6 +65,9 @@ target_link_libraries(water-policy-control PRIVATE water_sort)
 add_executable(water-unit-scenes apps/unit_scenes.cpp)
 target_link_libraries(water-unit-scenes PRIVATE water_sort)
 
+add_executable(water-depth-witness apps/depth_witness.cpp)
+target_link_libraries(water-depth-witness PRIVATE water_sort)
+
 include(CTest)
 if(BUILD_TESTING)
     add_executable(water-sort-tests tests/test_main.cpp)
@@ -153,6 +156,15 @@ if(BUILD_TESTING)
             --goal-exhausted 2
             --max-instances 2
             --out ${CMAKE_CURRENT_BINARY_DIR}/test-unit-scenes-output)
+    add_test(NAME water-depth-obstruction
+        COMMAND water-depth-witness
+            --left ${CMAKE_CURRENT_SOURCE_DIR}/tests/data/depth-obstruction-a.txt
+            --left-state 489067
+            --right ${CMAKE_CURRENT_SOURCE_DIR}/tests/data/depth-obstruction-b.txt
+            --right-state 10211
+            --scale 6
+            --window 6
+            --goal-exhausted 2)
     function(add_universe_regression NAME HEIGHT COLORS EMPTY CLASSES UNSOLVABLE)
         add_test(NAME ${NAME}
             COMMAND water-universe

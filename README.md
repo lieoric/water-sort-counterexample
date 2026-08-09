@@ -129,7 +129,9 @@ under `experiments/`.
   controller over an exact catalog, checking only the states induced by that
   controller.
 - `water-unit-scenes`: expansion of controlled border choices into one-item
-  moves, comparing finite top-item observation windows 2, 3, and 4.
+  moves, comparing finite top-item observation windows 2 through 6.
+- `water-depth-witness`: independent verification of a scalable pair of tight
+  states with identical bounded observations and disjoint safe actions.
 - A literal full-state Water BFS with forced bulk moves and locked completed
   columns, used only as a small-instance reference implementation.
 - Exhaustive cross-checks over 1,796 small initial arrangements, plus the
@@ -263,18 +265,19 @@ Expand those macro choices into one-item moves and compare observation windows:
 ```
 
 The unit-scene report intersects safe next moves for equal labeled-stack
-signatures at windows 2, 3, and 4. Each border action is physically valid and
+signatures at windows 2 through 6. Each border action is physically valid and
 is expanded completely, but the next macro state is rebuilt in canonical tight
 form. Thus this diagnoses a candidate small finite program while explicitly
 counting the still-unproved connections between macro traces. See [the
 thin-layer policy design](docs/thin-layer-policy-learning.md).
 
-On the current 3,501-instance catalog the two compressed controllers produce
-38 conflicts with two visible items, 5 with three, and 0 with four. The five
-three-item conflicts refine into only 29 four-item cases, so the natural
-candidate is a three-item rule with a fourth-item lookup for five ambiguous
-patterns. This remains a finite-catalog result, not a continuous all-height
-proof.
+On the combined 4,301-instance catalog, sampled through height 46, the two
+compressed controllers produce 59, 35, 6, 2, and 0 conflicts at visible-item
+depths 2 through 6. Thus the sampled minimum is `D = 6`. A scalable committed
+witness pair additionally proves that no height-independent item depth can
+choose a safe action for every possible frontier-winning tight configuration.
+A carefully controlled strategy might still avoid the obstruction family; see
+[the fixed-depth obstruction and its exact scope](docs/no-fixed-item-depth.md).
 
 For an unsolvable instance, write and independently check a certificate:
 
