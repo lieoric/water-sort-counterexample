@@ -30,6 +30,7 @@ from typing import Any, Sequence
 
 SAT_EXIT = 10
 UNSAT_EXIT = 20
+RGS_LENGTH_THREE_PREFIXES = ("000", "001", "010", "011", "012")
 
 
 class RunFailure(RuntimeError):
@@ -125,6 +126,8 @@ def base_result(args: argparse.Namespace, out: Path) -> dict[str, Any]:
     }
     if args.fix_instance is not None:
         result["problem"]["fixed_instance"] = file_record(args.fix_instance)
+    if args.rgs_prefix is not None:
+        result["problem"]["rgs_prefix"] = args.rgs_prefix
     return result
 
 
@@ -181,6 +184,8 @@ def generate_problem(
     ]
     if args.fix_instance is not None:
         command.extend(["--fix-instance", str(args.fix_instance)])
+    if args.rgs_prefix is not None:
+        command.extend(["--rgs-prefix", args.rgs_prefix])
     checked_command(
         result,
         "generate",
@@ -191,6 +196,23 @@ def generate_problem(
     require_file(cnf, "DIMACS formula")
     require_file(mapping, "variable map")
     require_file(metadata, "generator metadata")
+    try:
+        metadata_value = json.loads(read_text(metadata))
+    except (json.JSONDecodeError, OSError) as error:
+        raise RunFailure(f"generator metadata is not valid JSON: {error}") from error
+    if not isinstance(metadata_value, dict):
+        raise RunFailure("generator metadata is not a JSON object")
+    symmetry = metadata_value.get("symmetry")
+    if not isinstance(symmetry, dict):
+        raise RunFailure("generator metadata has no symmetry object")
+    if symmetry.get("rgs_prefix") != args.rgs_prefix:
+        raise RunFailure("generator metadata does not match the requested RGS prefix")
+    if args.rgs_prefix is not None and not (
+        symmetry.get("color_first_occurrence") is True
+        and symmetry.get("column_lexicographic_nondecreasing") is True
+        and symmetry.get("rgs_prefix_unit_clauses") == 3
+    ):
+        raise RunFailure("RGS shard did not retain both symmetry breakers and three units")
     update_file_records(result, [cnf, mapping, metadata, out / "generator.log"])
     return cnf, mapping, metadata
 
@@ -454,6 +476,11 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         type=Path,
         help="unit-fix item variables to this known instance (pipeline regression)",
     )
+    parser.add_argument(
+        "--rgs-prefix",
+        choices=RGS_LENGTH_THREE_PREFIXES,
+        help="unit-fix the first three flattened cells to one exact RGS shard",
+    )
     parser.add_argument("--cadical", type=Path, default=Path("tools/cadical"))
     parser.add_argument("--drat-trim", type=Path, default=Path("tools/drat-trim"))
     parser.add_argument("--oracle", type=Path, default=Path("tools/water-oracle"))
@@ -467,6 +494,8 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     ):
         if getattr(args, name) <= 0:
             parser.error(f"--{name.replace('_', '-')} must be positive")
+    if args.fix_instance is not None and args.rgs_prefix is not None:
+        parser.error("--fix-instance and --rgs-prefix are mutually exclusive")
     return args
 
 

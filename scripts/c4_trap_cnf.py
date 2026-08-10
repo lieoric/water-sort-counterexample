@@ -24,10 +24,33 @@ from typing import Iterable, Sequence
 
 COLOR_COUNT = 4
 EMPTY_COLUMNS = 2
+RGS_LENGTH_THREE_PREFIXES = ("000", "001", "010", "011", "012")
 
 
 class GenerationError(RuntimeError):
     """The requested encoding or input instance is invalid."""
+
+
+def is_restricted_growth_word(word: Sequence[int]) -> bool:
+    """Return whether ``word`` uses colours in first-occurrence order."""
+    if not word or word[0] != 0:
+        return False
+    greatest = 0
+    for color in word[1:]:
+        if not 0 <= color < COLOR_COUNT or color > greatest + 1:
+            return False
+        greatest = max(greatest, color)
+    return True
+
+
+def parse_rgs_prefix(value: str) -> str:
+    """Validate one member of the exact length-three RGS partition."""
+    if value not in RGS_LENGTH_THREE_PREFIXES:
+        choices = ", ".join(RGS_LENGTH_THREE_PREFIXES)
+        raise argparse.ArgumentTypeError(
+            f"RGS prefix must be one of {choices}, not {value!r}"
+        )
+    return value
 
 
 class VariablePool:
@@ -595,6 +618,40 @@ def expected_column_lex_clause_count(height: int) -> int:
     return (COLOR_COUNT - 1) * (15 * height - 10)
 
 
+def encode_color_first_occurrence(
+    writer: ClauseWriter, flattened: Sequence[Sequence[int]]
+) -> None:
+    """Name colours by first occurrence in one fixed flattened word."""
+    if not flattened or any(len(variables) != COLOR_COUNT for variables in flattened):
+        raise GenerationError("flattened item positions must contain four colours")
+    writer.add([flattened[0][0]])
+    for index, variables in enumerate(flattened):
+        for color in range(1, COLOR_COUNT):
+            writer.add(
+                [
+                    -variables[color],
+                    *[earlier[color - 1] for earlier in flattened[:index]],
+                ]
+            )
+
+
+def encode_rgs_prefix_units(
+    writer: ClauseWriter,
+    flattened: Sequence[Sequence[int]],
+    rgs_prefix: str,
+) -> int:
+    """Fix exactly one length-three restricted-growth shard."""
+    if rgs_prefix not in RGS_LENGTH_THREE_PREFIXES:
+        raise GenerationError("RGS prefix is not one of the five exact shards")
+    if len(flattened) < len(rgs_prefix):
+        raise GenerationError("flattened item word is shorter than the RGS prefix")
+    for variables, color_character in zip(flattened, rgs_prefix):
+        if len(variables) != COLOR_COUNT:
+            raise GenerationError("flattened item positions must contain four colours")
+        writer.add([variables[int(color_character)]])
+    return len(rgs_prefix)
+
+
 def encode_adjacent_column_lex(
     writer: ClauseWriter,
     pool: VariablePool,
@@ -671,6 +728,7 @@ def generate(args: argparse.Namespace) -> None:
     if not 2 <= height <= 16:
         raise GenerationError("height must be in [2, 16]")
 
+    rgs_prefix: str | None = getattr(args, "rgs_prefix", None)
     fixed_layout: list[list[int]] | None = None
     if args.fix_instance is not None:
         fixed_height, fixed_layout = read_instance(args.fix_instance)
@@ -678,11 +736,20 @@ def generate(args: argparse.Namespace) -> None:
             raise GenerationError(
                 f"fixed instance height {fixed_height} does not match {height}"
             )
+    if rgs_prefix is not None and fixed_layout is not None:
+        raise GenerationError("--rgs-prefix cannot be combined with --fix-instance")
+    if rgs_prefix is not None and rgs_prefix not in RGS_LENGTH_THREE_PREFIXES:
+        raise GenerationError("--rgs-prefix is not one of the five exact shards")
+    if rgs_prefix is not None and args.no_symmetry_breaking:
+        raise GenerationError(
+            "--rgs-prefix requires the colour and column symmetry breakers"
+        )
 
     symmetry_breaking = not args.no_symmetry_breaking and fixed_layout is None
     pool = VariablePool()
     writer = ClauseWriter(args.cnf)
     categories: dict[str, int] = {}
+    rgs_prefix_unit_clauses = 0
     try:
         # Items are indexed top-to-bottom.
         item = [
@@ -754,14 +821,7 @@ def generate(args: argparse.Namespace) -> None:
                 for column in range(COLOR_COUNT)
                 for position in range(height)
             ]
-            writer.add([flattened[0][0]])
-            for index, variables in enumerate(flattened):
-                for color in range(1, COLOR_COUNT):
-                    writer.add(
-                        [-variables[color], *[
-                            earlier[color - 1] for earlier in flattened[:index]
-                        ]]
-                    )
+            encode_color_first_occurrence(writer, flattened)
 
             # These two breakers are jointly safe: choose the globally least
             # flattened word in the S_4(columns) x S_4(colours) orbit.  Its
@@ -782,6 +842,16 @@ def generate(args: argparse.Namespace) -> None:
                 raise GenerationError("internal column-lex variable count mismatch")
             if column_lex_clauses != expected_column_lex_clause_count(height):
                 raise GenerationError("internal column-lex clause count mismatch")
+
+            # The five length-three restricted-growth words partition every
+            # assignment allowed by the colour first-occurrence breaker.  A
+            # shard fixes exactly one part of that partition with unit clauses.
+            if rgs_prefix is not None:
+                if not is_restricted_growth_word(tuple(map(int, rgs_prefix))):
+                    raise GenerationError("internal invalid restricted-growth prefix")
+                rgs_prefix_unit_clauses = encode_rgs_prefix_units(
+                    writer, flattened, rgs_prefix
+                )
         else:
             categories["column_lex_prefix"] = 0
             column_lex_clauses = 0
@@ -994,6 +1064,9 @@ def generate(args: argparse.Namespace) -> None:
             "color_first_occurrence": symmetry_breaking,
             "column_lexicographic_nondecreasing": symmetry_breaking,
             "column_lex_orientation": "top-to-bottom",
+            "rgs_prefix": rgs_prefix,
+            "rgs_prefix_length": len(rgs_prefix) if rgs_prefix is not None else 0,
+            "rgs_prefix_unit_clauses": rgs_prefix_unit_clauses,
             "column_lex_prefix_variables": categories["column_lex_prefix"],
             "column_lex_clauses": column_lex_clauses,
             "joint_group": "S4(columns) x S4(colors)",
@@ -1126,6 +1199,11 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     generate_parser.add_argument("--map", type=Path, required=True)
     generate_parser.add_argument("--metadata", type=Path, required=True)
     generate_parser.add_argument("--fix-instance", type=Path)
+    generate_parser.add_argument(
+        "--rgs-prefix",
+        type=parse_rgs_prefix,
+        help="unit-fix the first three flattened cells to one RGS shard",
+    )
     generate_parser.add_argument("--no-symmetry-breaking", action="store_true")
     generate_parser.set_defaults(function=generate)
 
