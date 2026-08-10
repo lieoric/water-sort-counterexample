@@ -28,6 +28,7 @@ jobs:
           tests/check_c4_h7_critical_pair_bypass.py
           tests/check_c4_h7_rainbow_lift.py
           tests/check_c4_h7_anchor_pair_potential.py
+          tests/check_c4_h7_anchor_pair_graph.py
       - name: Build the certified first-exhaustion census producer
         run: |
           cmake -S . -B build \
@@ -60,14 +61,21 @@ jobs:
           python tests/check_c4_h7_anchor_pair_potential.py \
             --report out/anchor/report.json 2>&1 \
             | tee out/anchor/potential-audit.json
+      - name: Check anchor-pair switching and the height-seven saturation cut
+        run: |
+          mkdir -p out/anchor-graph
+          set -o pipefail
+          python tests/check_c4_h7_anchor_pair_graph.py 2>&1 \
+            | tee out/anchor-graph/audit.log
       - name: Record the exact claim boundary
         run: |
           cat >> "$GITHUB_STEP_SUMMARY" <<'EOF'
           These checks certify three mathematical reductions: the exact
           critical-pair disable formula plus the past/future bypass, the
           two-anchor vector potential and first-sweep inequalities, and the
-          rainbow-transversal/token-error formula. They deliberately do not
-          claim universal c4/k2/h7 solvability.
+          rainbow-transversal/token-error formula. It also checks the clean
+          two-switch return saturation cut. They deliberately do not claim
+          universal c4/k2/h7 solvability.
           EOF
       - name: Hash the complete audit bundle
         if: always()
