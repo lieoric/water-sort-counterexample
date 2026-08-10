@@ -13,11 +13,21 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 
 from c4_trap_cnf import (  # noqa: E402
     COLOR_COUNT,
+    RGS_LENGTH_THREE_PREFIXES,
     VariablePool,
     encode_adjacent_column_lex,
     encode_binary_at_least,
     encode_binary_sum,
+    encode_color_first_occurrence,
     encode_guarded_selected_equivalence,
+    encode_rgs_prefix_units,
+    is_restricted_growth_word,
+)
+from aggregate_c4_trap_shards import (  # noqa: E402
+    AggregationError,
+    SAT_STATUS,
+    UNSAT_STATUS,
+    aggregate_results,
 )
 
 
@@ -42,6 +52,123 @@ def reference_value(reference: bool | int | None, true_variables: set[int]) -> b
     if reference is True:
         return True
     return (reference > 0) == (abs(reference) in true_variables)
+
+
+class RestrictedGrowthShardCoverageTest(unittest.TestCase):
+    def test_five_shards_are_exactly_all_length_three_rgs_words(self) -> None:
+        # Exhaust all 4^3 colour prefixes.  This is the finite coverage lemma
+        # used to combine the five independently checked h=7 shard results.
+        mathematical_words = {
+            "".join(map(str, word))
+            for word in itertools.product(range(COLOR_COUNT), repeat=3)
+            if is_restricted_growth_word(word)
+        }
+        pool = VariablePool()
+        flattened = [
+            [pool.new() for _color in range(COLOR_COUNT)]
+            for _position in range(3)
+        ]
+        writer = ClauseCollector()
+        encode_color_first_occurrence(writer, flattened)
+        encoded_words = {
+            "".join(map(str, word))
+            for word in itertools.product(range(COLOR_COUNT), repeat=3)
+            if clauses_hold(
+                writer.clauses,
+                {
+                    flattened[position][color]
+                    for position, color in enumerate(word)
+                },
+            )
+        }
+        expected = set(RGS_LENGTH_THREE_PREFIXES)
+        self.assertEqual(mathematical_words, expected)
+        self.assertEqual(encoded_words, expected)
+        self.assertEqual(len(encoded_words), 5)
+
+    def test_one_shard_adds_exactly_three_requested_unit_clauses(self) -> None:
+        pool = VariablePool()
+        flattened = [
+            [pool.new() for _color in range(COLOR_COUNT)]
+            for _position in range(3)
+        ]
+        writer = ClauseCollector()
+        count = encode_rgs_prefix_units(writer, flattened, "012")
+        self.assertEqual(count, 3)
+        self.assertEqual(
+            writer.clauses,
+            [[flattened[0][0]], [flattened[1][1]], [flattened[2][2]]],
+        )
+
+    @staticmethod
+    def shard_result(prefix: str, status: str) -> dict[str, object]:
+        stages: dict[str, object] = {
+            "cadical": {
+                "exit_code": 10 if status == SAT_STATUS else 20,
+                "timed_out": False,
+            }
+        }
+        if status == SAT_STATUS:
+            for stage_name in (
+                "dimacs_model_check",
+                "decode",
+                "water_oracle",
+                "water_verify",
+            ):
+                stages[stage_name] = {"exit_code": 0, "timed_out": False}
+        else:
+            stages["drat_trim"] = {"exit_code": 0, "timed_out": False}
+        return {
+            "schema": 1,
+            "problem": {
+                "colors": 4,
+                "empty_columns": 2,
+                "height": 7,
+                "rgs_prefix": prefix,
+            },
+            "proof_mode": "checked-drat",
+            "status": status,
+            "verified": True,
+            "stages": stages,
+        }
+
+    def all_results(self, status: str) -> list[tuple[str, dict[str, object]]]:
+        return [
+            (prefix, self.shard_result(prefix, status))
+            for prefix in RGS_LENGTH_THREE_PREFIXES
+        ]
+
+    def test_all_five_verified_unsat_shards_imply_global_unsat(self) -> None:
+        aggregate = aggregate_results(self.all_results(UNSAT_STATUS))
+        self.assertTrue(aggregate["verified"])
+        self.assertEqual(aggregate["status"], UNSAT_STATUS)
+
+    def test_one_verified_sat_shard_implies_global_sat(self) -> None:
+        results = self.all_results(UNSAT_STATUS)
+        results[2] = ("010", self.shard_result("010", SAT_STATUS))
+        aggregate = aggregate_results(results)
+        self.assertEqual(aggregate["status"], SAT_STATUS)
+        self.assertEqual(aggregate["sat_shards"], ["010"])
+
+    def test_missing_or_unverified_shard_is_never_accepted(self) -> None:
+        with self.assertRaises(AggregationError):
+            aggregate_results(self.all_results(UNSAT_STATUS)[:-1])
+
+        results = self.all_results(UNSAT_STATUS)
+        results[0][1]["verified"] = False
+        with self.assertRaises(AggregationError):
+            aggregate_results(results)
+
+    def test_search_only_or_duplicate_shard_is_never_accepted(self) -> None:
+        results = self.all_results(UNSAT_STATUS)
+        results[0][1]["proof_mode"] = "search-only"
+        with self.assertRaises(AggregationError):
+            aggregate_results(results)
+
+        results = self.all_results(UNSAT_STATUS)
+        results[-1] = ("duplicate", self.shard_result("011", UNSAT_STATUS))
+        with self.assertRaises(AggregationError):
+            aggregate_results(results)
 
 
 class AdjacentColumnLexTest(unittest.TestCase):

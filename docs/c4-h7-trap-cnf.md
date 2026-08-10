@@ -27,6 +27,32 @@ the sorted column words, since swapping an adjacent inversion would make the
 flattened word smaller.  Thus every joint orbit has a representative satisfying
 both constraints; no physical instance is removed.
 
+### Exact five-way `h=7` partition
+
+The fallback workflow partitions the unrestricted, symmetry-broken `h=7`
+formula by the first three cells of that same flattened top-to-bottom word.
+A restricted-growth word starts at `0`, and every later value is at most one
+more than the greatest earlier value.  Exhausting all `4^3 = 64` colour triples
+shows that the possible length-three prefixes are exactly
+
+```
+000  001  010  011  012
+```
+
+For each shard the generator retains both symmetry breakers and adds three unit
+clauses fixing one of these prefixes.  It rejects combining this option with a
+fixed regression instance or with disabled symmetry breaking, so the fixed
+`h=8` pipeline is unchanged.  The five shard formulas are pairwise disjoint and
+their disjunction is the original symmetry-broken formula.
+
+Consequently the global rule is exact: one independently verified SAT shard is
+an unrestricted fixed-layout NO instance, while unrestricted UNSAT follows only
+after all five shards have independently verified DRAT proofs.  The aggregation
+script rejects missing, duplicate, unchecked, wrong-height, wrong-prefix, or
+search-only summaries.  The exhaustive 64-assignment coverage check runs both
+as a unit test and again inside the aggregator.  Thus the global theorem consists
+of the five checked shard results together with this finite coverage lemma.
+
 For a column, an endpoint `s` in `1..h-1` is active when positions `s-1` and
 `s` have different colours.  It means that the top `s` items have been exposed
 and the current source has capacity `s`.  Endpoint `h` means that the original
@@ -121,3 +147,9 @@ The GitHub workflow uses two separate validation paths:
 
 The workflow first runs the known `h=8` SAT regression before attempting the
 `h=6` and `h=7` proof jobs.  Solver output alone is never treated as a proof.
+
+The separate `c4-h7-five-shards.yml` fallback builds the same pinned tools once,
+runs the five `h=7` shards in parallel, archives every DIMACS/proof or SAT
+witness, and publishes a small aggregate result.  Every shard must have either
+an accepted DRAT check or both independent Water Sort SAT-witness checks before
+the workflow can accept the aggregate.

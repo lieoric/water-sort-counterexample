@@ -1,0 +1,291 @@
+name: Certify exact c4 k2 h7 in five RGS shards
+run-name: Exact h7 trap CNF - five checked RGS shards
+
+on:
+  push:
+    branches: [codex/c4-h7-five-shards]
+    paths:
+      - .github/workflows/c4-h7-five-shards.yml
+      - scripts/c4_trap_cnf.py
+      - scripts/aggregate_c4_trap_shards.py
+      - scripts/c4_trap_cnf_requirements.txt
+      - scripts/run_c4_trap_cnf.py
+      - tests/test_c4_trap_cnf.py
+      - apps/oracle.cpp
+      - apps/verify.cpp
+      - include/water_sort/**
+      - src/**
+      - CMakeLists.txt
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: exact-c4-k2-h7-five-shards-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CADICAL_COMMIT: c60730422e758ef1cebe7aeddf2dda31c996bf04
+  DRAT_TRIM_COMMIT: 2e3b2dc0ecf938addbd779d42877b6ed69d9a985
+
+jobs:
+  prepare:
+    name: Build pinned tools and check shard coverage
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: scripts/c4_trap_cnf_requirements.txt
+      - name: Install pinned CNF encoder dependency
+        run: python -m pip install --disable-pip-version-check -r scripts/c4_trap_cnf_requirements.txt
+      - name: Check code and the exhaustive 4^3 shard coverage lemma
+        run: |
+          python -m py_compile \
+            scripts/c4_trap_cnf.py \
+            scripts/run_c4_trap_cnf.py \
+            scripts/aggregate_c4_trap_shards.py
+          python -m unittest tests/test_c4_trap_cnf.py -v
+          python scripts/c4_trap_cnf.py --help
+          python scripts/run_c4_trap_cnf.py --help
+          python scripts/aggregate_c4_trap_shards.py --help
+      - name: Generate one tiny sharded structural formula
+        run: |
+          mkdir -p smoke
+          python scripts/c4_trap_cnf.py generate \
+            --height 2 \
+            --rgs-prefix 012 \
+            --cnf smoke/problem.cnf \
+            --map smoke/problem.map.json \
+            --metadata smoke/metadata.json
+          jq -e '
+            .symmetry.color_first_occurrence == true and
+            .symmetry.column_lexicographic_nondecreasing == true and
+            .symmetry.rgs_prefix == "012" and
+            .symmetry.rgs_prefix_length == 3 and
+            .symmetry.rgs_prefix_unit_clauses == 3 and
+            .counts.non_goal_states == 5 and
+            .counts.guarded_transitions == 16
+          ' smoke/metadata.json
+          test "$(head -c 5 smoke/problem.cnf)" = "p cnf"
+      - name: Build and test the Water Sort oracle and certificate verifier
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DWSC_WARNINGS_AS_ERRORS=ON
+          cmake --build build \
+            --target water-oracle water-verify water-sort-tests --parallel 2
+          ctest --test-dir build --output-on-failure -R '^water-sort-tests$'
+      - name: Fetch and build pinned CaDiCaL and DRAT-trim
+        run: |
+          mkdir -p vendor/cadical vendor/drat-trim tools
+
+          git -C vendor/cadical init -q
+          git -C vendor/cadical remote add origin https://github.com/arminbiere/cadical.git
+          git -C vendor/cadical fetch --depth 1 origin "$CADICAL_COMMIT"
+          git -C vendor/cadical checkout --detach FETCH_HEAD
+          test "$(git -C vendor/cadical rev-parse HEAD)" = "$CADICAL_COMMIT"
+          (cd vendor/cadical && ./configure && make -j2)
+
+          git -C vendor/drat-trim init -q
+          git -C vendor/drat-trim remote add origin https://github.com/marijnheule/drat-trim.git
+          git -C vendor/drat-trim fetch --depth 1 origin "$DRAT_TRIM_COMMIT"
+          git -C vendor/drat-trim checkout --detach FETCH_HEAD
+          test "$(git -C vendor/drat-trim rev-parse HEAD)" = "$DRAT_TRIM_COMMIT"
+          make -C vendor/drat-trim drat-trim
+
+          cp build/water-oracle build/water-verify tools/
+          cp vendor/cadical/build/cadical tools/
+          cp vendor/drat-trim/drat-trim tools/
+          chmod +x tools/*
+      - name: Record and package the exact toolchain once
+        run: |
+          {
+            echo "cadical_commit=$CADICAL_COMMIT"
+            echo "drat_trim_commit=$DRAT_TRIM_COMMIT"
+            echo "cadical_version=$(tools/cadical --version)"
+            echo "compiler=$(c++ --version | head -n 1)"
+            echo "python=$(python --version 2>&1)"
+            python -c "import pysat; print('python_sat=' + pysat.__version__)"
+            python -c "import importlib.metadata as m; print('pypblib=' + m.version('pypblib'))"
+          } > tools/TOOLCHAIN.txt
+          (cd tools && sha256sum cadical drat-trim water-oracle water-verify) \
+            > tools/TOOLCHAIN.sha256
+          tar -czf exact-c4-proof-tools.tar.gz tools
+      - uses: actions/upload-artifact@v6
+        with:
+          name: exact-c4-h7-shard-proof-tools
+          path: exact-c4-proof-tools.tar.gz
+          if-no-files-found: error
+          retention-days: 7
+
+  shards:
+    name: h7 RGS shard ${{ matrix.rgs_prefix }}
+    needs: prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      matrix:
+        rgs_prefix: ["000", "001", "010", "011", "012"]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: scripts/c4_trap_cnf_requirements.txt
+      - name: Install pinned CNF encoder dependency
+        run: python -m pip install --disable-pip-version-check -r scripts/c4_trap_cnf_requirements.txt
+      - uses: actions/download-artifact@v6
+        with:
+          name: exact-c4-h7-shard-proof-tools
+      - name: Extract the shared exact toolchain
+        run: tar -xzf exact-c4-proof-tools.tar.gz
+      - name: Generate, solve, and independently check shard ${{ matrix.rgs_prefix }}
+        id: compute
+        run: |
+          set +e
+          python scripts/run_c4_trap_cnf.py \
+            --height 7 \
+            --rgs-prefix "${{ matrix.rgs_prefix }}" \
+            --proof-mode checked-drat \
+            --timeout-seconds 9900 \
+            --proof-timeout-seconds 8100 \
+            --out out
+          code=$?
+          set -e
+          echo "exit_code=$code" >> "$GITHUB_OUTPUT"
+      - name: Compress proof and hash every archived file
+        if: always()
+        run: |
+          mkdir -p out
+          cp tools/TOOLCHAIN.txt tools/TOOLCHAIN.sha256 out/
+          if test -f out/proof.drat; then
+            (cd out && sha256sum proof.drat > proof.drat.sha256)
+            zstd -T0 -3 --rm out/proof.drat
+          fi
+          (cd out && find . -type f ! -name SHA256SUMS -print0 | \
+            sort -z | xargs -0 -r sha256sum) > out/SHA256SUMS
+      - name: Add the checked shard result to the run summary
+        if: always()
+        run: |
+          echo '## Exact c4 / k2 / h7 shard `${{ matrix.rgs_prefix }}`' \
+            >> "$GITHUB_STEP_SUMMARY"
+          echo >> "$GITHUB_STEP_SUMMARY"
+          if test -f out/result.json; then
+            jq -r '"- Status: `\(.status)`\n- Independently verified: `\(.verified)`\n- Claim: \(.claim // .error // "none")"' \
+              out/result.json >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo '- Runner did not create result.json.' >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: exact-c4-k2-h7-shard-${{ matrix.rgs_prefix }}
+          path: out/
+          if-no-files-found: error
+          retention-days: 90
+      - name: Upload the small shard summary for exact aggregation
+        uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: exact-c4-k2-h7-shard-summary-${{ matrix.rgs_prefix }}
+          path: out/result.json
+          if-no-files-found: error
+          retention-days: 90
+      - name: Require an independently verified shard result
+        if: always()
+        env:
+          RUNNER_EXIT: ${{ steps.compute.outputs.exit_code }}
+          RGS_PREFIX: ${{ matrix.rgs_prefix }}
+        run: |
+          test "$RUNNER_EXIT" = 0
+          jq -e --arg prefix "$RGS_PREFIX" '
+            .schema == 1 and
+            .problem.colors == 4 and
+            .problem.empty_columns == 2 and
+            .problem.height == 7 and
+            .problem.rgs_prefix == $prefix and
+            .proof_mode == "checked-drat" and
+            .verified == true and
+            .stages.cadical.timed_out == false and
+            (
+              (
+                .status == "UNSAT_VERIFIED" and
+                .stages.cadical.exit_code == 20 and
+                .stages.drat_trim.exit_code == 0 and
+                .stages.drat_trim.timed_out == false
+              ) or (
+                .status == "SAT_VERIFIED_NO_INSTANCE" and
+                .stages.cadical.exit_code == 10 and
+                .stages.dimacs_model_check.exit_code == 0 and
+                .stages.decode.exit_code == 0 and
+                .stages.water_oracle.exit_code == 0 and
+                .stages.water_verify.exit_code == 0
+              )
+            )
+          ' out/result.json
+
+  aggregate:
+    name: Combine all five checked shards
+    if: always()
+    needs: [prepare, shards]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Download all five small shard summaries
+        uses: actions/download-artifact@v6
+        continue-on-error: true
+        with:
+          pattern: exact-c4-k2-h7-shard-summary-*
+          path: summaries
+      - name: Apply the exact SAT-any / UNSAT-all aggregation rule
+        id: combine
+        run: |
+          set +e
+          python scripts/aggregate_c4_trap_shards.py \
+            --summaries summaries \
+            --output global-result.json
+          code=$?
+          set -e
+          echo "exit_code=$code" >> "$GITHUB_OUTPUT"
+      - name: Add the global theorem status to the run summary
+        if: always()
+        run: |
+          echo '## Five-shard h7 aggregate' >> "$GITHUB_STEP_SUMMARY"
+          echo >> "$GITHUB_STEP_SUMMARY"
+          jq -r '"- Status: `\(.status)`\n- Verified: `\(.verified)`\n- Claim: \(.claim // .error // "none")"' \
+            global-result.json >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: exact-c4-k2-h7-five-shard-aggregate
+          path: global-result.json
+          if-no-files-found: error
+          retention-days: 90
+      - name: Accept only the exact global theorem
+        if: always()
+        env:
+          AGGREGATE_EXIT: ${{ steps.combine.outputs.exit_code }}
+          PREPARE_RESULT: ${{ needs.prepare.result }}
+          SHARDS_RESULT: ${{ needs.shards.result }}
+        run: |
+          test "$PREPARE_RESULT" = success
+          test "$SHARDS_RESULT" = success
+          test "$AGGREGATE_EXIT" = 0
+          jq -e '
+            .verified == true and
+            .partition.prefixes == ["000", "001", "010", "011", "012"] and
+            .partition.coverage_checked_by_exhaustive_assignments == 64 and
+            (
+              .status == "SAT_VERIFIED_NO_INSTANCE" or
+              .status == "UNSAT_VERIFIED"
+            )
+          ' global-result.json
