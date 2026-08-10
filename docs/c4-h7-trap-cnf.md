@@ -55,6 +55,40 @@ d(c) + s_i * [source i has colour c] > 0.
 The successor endpoint is the first later active boundary, or `h` if no later
 boundary exists.
 
+## Shared exact arithmetic
+
+The implementation does not expand that last inequality as a separate
+pseudo-Boolean formula for every source.  For each column, endpoint, and colour
+it first builds one shared binary prefix count
+
+```
+C(i,s,c) = count(c in positions 0 .. s-1).
+```
+
+For a live endpoint define `Y(i,s,c)=C(i,s,c)+s(1-T(i,s,c))`, where `T` is the
+current-top indicator.  For an exhausted endpoint use `Y=C`.  Then each state
+and colour needs only one shared carry-save sum
+
+```
+A = sum of live endpoint capacities,
+S(c) = sum_i Y(i,s_i,c) = d(c) + A.
+```
+
+The source-specific test is now just one of two constant comparisons of this
+same sum:
+
+```
+T(i,s_i,c)=0:  S(c) >= A + 1,
+T(i,s_i,c)=1:  S(c) >= A - s_i + 1.
+```
+
+Half adders, full adders, binary constant comparators, and the top-indicator
+multiplexer are all encoded as equivalences.  State-local gates are guarded by
+the corresponding trap variable: they are exact whenever that state is marked,
+which is precisely when its legality and transition clauses can have an effect.
+Unmarked-state arithmetic is irrelevant to every closure obligation.  This
+guarding therefore preserves the SAT-if-and-only-if-counterexample statement.
+
 ## Closed trap
 
 For every non-goal endpoint tuple the encoding has a variable `L_s`.  It

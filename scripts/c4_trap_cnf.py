@@ -209,6 +209,353 @@ def encode_pb(
         writer.add_guarded(encoded.clauses, guard)
 
 
+def add_clause_with_guard(
+    writer: ClauseWriter,
+    literals: Sequence[int],
+    guard: int | None = None,
+) -> None:
+    """Add one clause, optionally disabled when ``guard`` is true."""
+    if guard is None:
+        writer.add(literals)
+    else:
+        writer.add([guard, *literals])
+
+
+def encode_half_adder(
+    writer: ClauseWriter,
+    pool: VariablePool,
+    left: int,
+    right: int,
+    *,
+    guard: int | None = None,
+) -> tuple[int, int]:
+    """Return exact low and carry bits for ``left + right``.
+
+    Inputs may be signed literals.  When a guard is supplied, both output
+    equivalences are required only while the guard is false.
+    """
+    low = pool.new()
+    carry = pool.new()
+
+    # low <=> left xor right.
+    for clause in (
+        [left, right, -low],
+        [-left, -right, -low],
+        [left, -right, low],
+        [-left, right, low],
+    ):
+        add_clause_with_guard(writer, clause, guard)
+
+    # carry <=> left and right.
+    for clause in (
+        [-carry, left],
+        [-carry, right],
+        [-left, -right, carry],
+    ):
+        add_clause_with_guard(writer, clause, guard)
+    return low, carry
+
+
+def encode_full_adder(
+    writer: ClauseWriter,
+    pool: VariablePool,
+    first: int,
+    second: int,
+    third: int,
+    *,
+    guard: int | None = None,
+) -> tuple[int, int]:
+    """Return exact low and carry bits for three signed input literals."""
+    low = pool.new()
+    carry = pool.new()
+    inputs = (first, second, third)
+
+    # Exactly one truth-table row is active for any complete input assignment.
+    for values in itertools.product((False, True), repeat=3):
+        antecedent_negation = [
+            -literal if value else literal
+            for literal, value in zip(inputs, values)
+        ]
+        parity = sum(values) & 1
+        add_clause_with_guard(
+            writer,
+            [*antecedent_negation, low if parity else -low],
+            guard,
+        )
+
+    # carry <=> at least two inputs are true.
+    for clause in (
+        [-first, -second, carry],
+        [-first, -third, carry],
+        [-second, -third, carry],
+        [-carry, first, second],
+        [-carry, first, third],
+        [-carry, second, third],
+    ):
+        add_clause_with_guard(writer, clause, guard)
+    return low, carry
+
+
+def encode_binary_sum(
+    writer: ClauseWriter,
+    pool: VariablePool,
+    operands: Sequence[Sequence[int | None]],
+    *,
+    guard: int | None = None,
+) -> list[int | None]:
+    """Return an exact little-endian binary sum using a Wallace reduction.
+
+    ``None`` denotes a constant-zero bit.  Signed literals are accepted as
+    ordinary Boolean input bits.  The carry-save reduction shares arithmetic
+    instead of expanding the same weighted PB comparison once per source.
+    """
+    columns: list[list[int]] = []
+    for operand in operands:
+        for bit, literal in enumerate(operand):
+            if literal is None:
+                continue
+            if literal == 0:
+                raise GenerationError("zero is not a binary-adder literal")
+            while len(columns) <= bit:
+                columns.append([])
+            columns[bit].append(literal)
+
+    bit = 0
+    while bit < len(columns):
+        while len(columns[bit]) > 2:
+            first = columns[bit].pop()
+            second = columns[bit].pop()
+            third = columns[bit].pop()
+            low, carry = encode_full_adder(
+                writer, pool, first, second, third, guard=guard
+            )
+            columns[bit].append(low)
+            while len(columns) <= bit + 1:
+                columns.append([])
+            columns[bit + 1].append(carry)
+        bit += 1
+
+    result: list[int | None] = []
+    carry: int | None = None
+    bit = 0
+    while bit < len(columns) or carry is not None:
+        inputs = list(columns[bit]) if bit < len(columns) else []
+        if carry is not None:
+            inputs.append(carry)
+        if not inputs:
+            result.append(None)
+            carry = None
+        elif len(inputs) == 1:
+            result.append(inputs[0])
+            carry = None
+        elif len(inputs) == 2:
+            low, carry = encode_half_adder(
+                writer, pool, inputs[0], inputs[1], guard=guard
+            )
+            result.append(low)
+        elif len(inputs) == 3:
+            low, carry = encode_full_adder(
+                writer,
+                pool,
+                inputs[0],
+                inputs[1],
+                inputs[2],
+                guard=guard,
+            )
+            result.append(low)
+        else:  # The carry-save pass leaves at most two wires per column.
+            raise GenerationError("internal binary-adder column overflow")
+        bit += 1
+
+    while result and result[-1] is None:
+        result.pop()
+    return result
+
+
+BooleanReference = bool | int
+
+
+def negate_reference(reference: BooleanReference) -> BooleanReference:
+    if reference is True:
+        return False
+    if reference is False:
+        return True
+    return -reference
+
+
+def add_reference_clause(
+    writer: ClauseWriter, references: Sequence[BooleanReference]
+) -> None:
+    """Add a clause containing literals and compile-time Boolean constants."""
+    literals: list[int] = []
+    for reference in references:
+        if reference is True:
+            return
+        if reference is False:
+            continue
+        literals.append(reference)
+    writer.add(literals)
+
+
+def encode_and_reference(
+    writer: ClauseWriter,
+    pool: VariablePool,
+    left: BooleanReference,
+    right: BooleanReference,
+    *,
+    guard: int | None = None,
+) -> BooleanReference:
+    if left is False or right is False:
+        return False
+    if left is True:
+        return right
+    if right is True:
+        return left
+    if left == right:
+        return left
+    if left == -right:
+        return False
+    output = pool.new()
+    for clause in (
+        [-output, left],
+        [-output, right],
+        [-left, -right, output],
+    ):
+        add_clause_with_guard(writer, clause, guard)
+    return output
+
+
+def encode_or_reference(
+    writer: ClauseWriter,
+    pool: VariablePool,
+    left: BooleanReference,
+    right: BooleanReference,
+    *,
+    guard: int | None = None,
+) -> BooleanReference:
+    if left is True or right is True:
+        return True
+    if left is False:
+        return right
+    if right is False:
+        return left
+    if left == right:
+        return left
+    if left == -right:
+        return True
+    output = pool.new()
+    for clause in (
+        [-left, output],
+        [-right, output],
+        [-output, left, right],
+    ):
+        add_clause_with_guard(writer, clause, guard)
+    return output
+
+
+def encode_binary_at_least(
+    writer: ClauseWriter,
+    pool: VariablePool,
+    bits: Sequence[int | None],
+    threshold: int,
+    *,
+    maximum: int | None = None,
+    guard: int | None = None,
+) -> BooleanReference:
+    """Return an exact reference for an unsigned binary ``>=`` comparison."""
+    if threshold <= 0:
+        return True
+    if maximum is not None and threshold > maximum:
+        return False
+    width = max(
+        len(bits),
+        threshold.bit_length(),
+        maximum.bit_length() if maximum is not None else 0,
+    )
+    result: BooleanReference = True
+    for bit in range(width):
+        value: BooleanReference = (
+            bits[bit] if bit < len(bits) and bits[bit] is not None else False
+        )
+        if threshold & (1 << bit):
+            result = encode_and_reference(
+                writer, pool, value, result, guard=guard
+            )
+        else:
+            result = encode_or_reference(
+                writer, pool, value, result, guard=guard
+            )
+    return result
+
+
+def encode_guarded_selected_equivalence(
+    writer: ClauseWriter,
+    *,
+    enable: int,
+    selector: int,
+    selector_value: bool,
+    output: int,
+    reference: BooleanReference,
+) -> None:
+    """Require ``output <=> reference`` under enable and one selector value."""
+    selector_disabled = -selector if selector_value else selector
+    prefix: list[BooleanReference] = [-enable, selector_disabled]
+    add_reference_clause(writer, [*prefix, -output, reference])
+    add_reference_clause(
+        writer, [*prefix, output, negate_reference(reference)]
+    )
+
+
+def endpoint_value_maximum(endpoint: int, height: int) -> int:
+    """Maximum of C+s(1-T) for live endpoints, or C when exhausted."""
+    return height if endpoint == height else 2 * endpoint - 1
+
+
+def encode_endpoint_values(
+    writer: ClauseWriter,
+    pool: VariablePool,
+    item: Sequence[Sequence[Sequence[int]]],
+    height: int,
+) -> list[list[list[list[int | None]]]]:
+    """Share all per-column prefix/host-adjusted values across states.
+
+    For a live endpoint ``s``, the value is
+    ``C[column,s,color] + s * (1 - T[column,s,color])``.  For endpoint
+    ``height`` it is just the full prefix count C, because that column is
+    exhausted and hosts no colour.
+    """
+    values: list[list[list[list[int | None]]]] = [
+        [
+            [[] for _color in range(COLOR_COUNT)]
+            for _endpoint in range(height + 1)
+        ]
+        for _column in range(COLOR_COUNT)
+    ]
+    for column in range(COLOR_COUNT):
+        for color in range(COLOR_COUNT):
+            prefix: list[int | None] = []
+            for endpoint in range(1, height + 1):
+                prefix = encode_binary_sum(
+                    writer,
+                    pool,
+                    [prefix, [item[column][endpoint - 1][color]]],
+                )[: endpoint.bit_length()]
+                if endpoint == height:
+                    values[column][endpoint][color] = list(prefix)
+                    continue
+
+                top = item[column][endpoint - 1][color]
+                conditional_host = [
+                    -top if endpoint & (1 << bit) else None
+                    for bit in range(endpoint.bit_length())
+                ]
+                maximum = endpoint_value_maximum(endpoint, height)
+                values[column][endpoint][color] = encode_binary_sum(
+                    writer, pool, [prefix, conditional_host]
+                )[: maximum.bit_length()]
+    return values
+
+
 def initial_guard(
     boundary: list[list[int]], column: int, endpoint: int, height: int
 ) -> list[int]:
@@ -444,6 +791,17 @@ def generate(args: argparse.Namespace) -> None:
                 for position in range(height):
                     writer.add([item[column][position][fixed_layout[column][position]]])
 
+        # Prefix counts and host-adjusted endpoint values depend only on the
+        # fixed item layout, so build them once and share them across every
+        # state that uses the same (column, endpoint, colour) triple.
+        endpoint_arithmetic_start = pool.top
+        endpoint_arithmetic_clause_start = writer.clauses
+        endpoint_values = encode_endpoint_values(writer, pool, item, height)
+        categories["endpoint_arithmetic"] = pool.top - endpoint_arithmetic_start
+        endpoint_arithmetic_clauses = (
+            writer.clauses - endpoint_arithmetic_clause_start
+        )
+
         # The unique actual initial tuple is marked.  Initial tuples that are
         # already goals (two monochrome original columns) are explicitly
         # forbidden, otherwise they would create a spurious SAT assignment.
@@ -468,55 +826,100 @@ def generate(args: argparse.Namespace) -> None:
         positive_count = 0
         legal_count = 0
         transition_count = 0
+        state_color_sum_count = 0
+        state_arithmetic_variables = 0
+        state_arithmetic_clauses = 0
+        positive_mux_clauses = 0
         for state in states:
             marked = trap[state]
             exhausted = sum(endpoint == height for endpoint in state)
             legal_limit = EMPTY_COLUMNS + exhausted
-            for source, source_endpoint in enumerate(state):
-                if source_endpoint == height:
-                    continue
+            live_sources = [
+                source
+                for source, endpoint in enumerate(state)
+                if endpoint < height
+            ]
+            active_capacity = sum(state[source] for source in live_sources)
+            positives_by_source: dict[int, list[int]] = {
+                source: [] for source in live_sources
+            }
 
-                positives: list[int] = []
-                for color in range(COLOR_COUNT):
+            # Let C(i,s,c) be the prefix count and T(i,s,c) the current top
+            # colour indicator.  The shared sum below is
+            #
+            #   S = sum_live (C + s(1-T)) + sum_exhausted C = d + A,
+            #
+            # where d=F-sum_live(sT) and A=sum_live(s).  Source i is positive
+            # exactly when S >= A+1 if T_i=0, or S >= A-s_i+1 if T_i=1.
+            # Thus one state-colour adder serves every live source.
+            for color in range(COLOR_COUNT):
+                arithmetic_start = pool.top
+                arithmetic_clause_start = writer.clauses
+                maximum = sum(
+                    endpoint_value_maximum(endpoint, height)
+                    for endpoint in state
+                )
+                shared_sum = encode_binary_sum(
+                    writer,
+                    pool,
+                    [
+                        endpoint_values[column][endpoint][color]
+                        for column, endpoint in enumerate(state)
+                    ],
+                    guard=-marked,
+                )[: maximum.bit_length()]
+                thresholds = {active_capacity + 1}
+                thresholds.update(
+                    active_capacity - state[source] + 1
+                    for source in live_sources
+                )
+                comparisons = {
+                    threshold: encode_binary_at_least(
+                        writer,
+                        pool,
+                        shared_sum,
+                        threshold,
+                        maximum=maximum,
+                        guard=-marked,
+                    )
+                    for threshold in thresholds
+                }
+                state_arithmetic_variables += pool.top - arithmetic_start
+                state_arithmetic_clauses += (
+                    writer.clauses - arithmetic_clause_start
+                )
+                state_color_sum_count += 1
+
+                for source in live_sources:
+                    source_endpoint = state[source]
                     positive = pool.new()
-                    positives.append(positive)
+                    positives_by_source[source].append(positive)
                     positive_count += 1
-
-                    literals: list[int] = []
-                    weights: list[int] = []
-                    for column, endpoint in enumerate(state):
-                        for position in range(endpoint):
-                            literals.append(item[column][position][color])
-                            weights.append(1)
-
-                    hosted_elsewhere = 0
-                    for column, endpoint in enumerate(state):
-                        if column == source or endpoint == height:
-                            continue
-                        literals.append(-item[column][endpoint - 1][color])
-                        weights.append(endpoint)
-                        hosted_elsewhere += endpoint
-
-                    # positive <=> F_c - sum(other host capacities) > 0.
-                    encode_pb(
+                    top = item[source][source_endpoint - 1][color]
+                    mux_clause_start = writer.clauses
+                    encode_guarded_selected_equivalence(
                         writer,
-                        pool,
-                        relation="atleast",
-                        literals=literals,
-                        weights=weights,
-                        bound=hosted_elsewhere + 1,
-                        guard=-positive,
+                        enable=marked,
+                        selector=top,
+                        selector_value=False,
+                        output=positive,
+                        reference=comparisons[active_capacity + 1],
                     )
-                    encode_pb(
+                    encode_guarded_selected_equivalence(
                         writer,
-                        pool,
-                        relation="atmost",
-                        literals=literals,
-                        weights=weights,
-                        bound=hosted_elsewhere,
-                        guard=positive,
+                        enable=marked,
+                        selector=top,
+                        selector_value=True,
+                        output=positive,
+                        reference=comparisons[
+                            active_capacity - source_endpoint + 1
+                        ],
                     )
+                    positive_mux_clauses += writer.clauses - mux_clause_start
 
+            for source in live_sources:
+                source_endpoint = state[source]
+                positives = positives_by_source[source]
                 legal = pool.new()
                 legal_count += 1
                 # Four variables make a truth-table reification smaller and
@@ -549,6 +952,7 @@ def generate(args: argparse.Namespace) -> None:
                     writer.add(clause)
                     transition_count += 1
 
+        categories["state_arithmetic"] = state_arithmetic_variables
         categories["positive"] = positive_count
         categories["legal"] = legal_count
         if transition_count != expected_transition_count(height):
@@ -556,9 +960,13 @@ def generate(args: argparse.Namespace) -> None:
                 f"transition count {transition_count} does not match "
                 f"{expected_transition_count(height)}"
             )
+        if state_color_sum_count != len(states) * COLOR_COUNT:
+            raise GenerationError("internal shared state-colour sum count mismatch")
 
         semantic_variables = sum(categories.values())
         categories["pb_auxiliary"] = pool.top - semantic_variables
+        if categories["pb_auxiliary"] < 0:
+            raise GenerationError("internal variable category count mismatch")
         writer.finish(pool.top)
     except Exception:
         writer.abort()
@@ -590,6 +998,21 @@ def generate(args: argparse.Namespace) -> None:
             "column_lex_clauses": column_lex_clauses,
             "joint_group": "S4(columns) x S4(colors)",
             "representative": "lexicographically least flattened orbit word",
+        },
+        "shared_arithmetic": {
+            "identity": "S=d+A; positive iff S>=A+1 or S>=A-s_i+1",
+            "state_color_sums": state_color_sum_count,
+            "source_color_predicates": positive_count,
+            "variables": {
+                "endpoint_values": categories["endpoint_arithmetic"],
+                "state_sums_and_comparisons": categories["state_arithmetic"],
+            },
+            "clauses": {
+                "endpoint_values": endpoint_arithmetic_clauses,
+                "state_sums_and_comparisons": state_arithmetic_clauses,
+                "positive_threshold_muxes": positive_mux_clauses,
+            },
+            "state_local_gates_guarded_by_trap": True,
         },
         "fixed_instance": (
             {
