@@ -29,6 +29,8 @@ jobs:
           tests/check_c4_h7_rainbow_lift.py
           tests/check_c4_h7_anchor_pair_potential.py
           tests/check_c4_h7_anchor_pair_graph.py
+          tests/check_c4_h7_e2_a_not_q_four_source.py
+          tests/check_c4_h7_d2_four_source_q5_bypass.py
       - name: Build the certified first-exhaustion census producer
         run: |
           cmake -S . -B build \
@@ -67,6 +69,28 @@ jobs:
           set -o pipefail
           python tests/check_c4_h7_anchor_pair_graph.py 2>&1 \
             | tee out/anchor-graph/audit.log
+      - name: Check the E=2 A-form fixed-future four-source continuation
+        run: |
+          mkdir -p out/four-source-a
+          set -o pipefail
+          python tests/check_c4_h7_e2_a_not_q_four_source.py 2>&1 \
+            | tee out/four-source-a/audit.log
+          {
+            printf '%s\n' '### E=2 A-form four-source audit' '' '```text'
+            cat out/four-source-a/audit.log
+            printf '%s\n' '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Check the E=2 Q-form q5 later-rotor bypass
+        run: |
+          mkdir -p out/four-source-q5
+          set -o pipefail
+          python tests/check_c4_h7_d2_four_source_q5_bypass.py 2>&1 \
+            | tee out/four-source-q5/audit.log
+          {
+            printf '%s\n' '### E=2 Q-form q5 four-source audit' '' '```text'
+            cat out/four-source-q5/audit.log
+            printf '%s\n' '```'
+          } >> "$GITHUB_STEP_SUMMARY"
       - name: Record the exact claim boundary
         run: |
           cat >> "$GITHUB_STEP_SUMMARY" <<'EOF'
@@ -74,8 +98,10 @@ jobs:
           critical-pair disable formula plus the past/future bypass, the
           two-anchor vector potential and first-sweep inequalities, and the
           rainbow-transversal/token-error formula. It also checks the clean
-          two-switch return saturation cut. They deliberately do not claim
-          universal c4/k2/h7 solvability.
+          two-switch return saturation cut, the fixed-future E=2 A-form
+          four-source continuation, and the scoped E=2 Q-form q5 later-rotor
+          bypass. They deliberately do not claim universal c4/k2/h7
+          solvability.
           EOF
       - name: Hash the complete audit bundle
         if: always()
