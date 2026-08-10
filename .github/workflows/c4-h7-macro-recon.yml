@@ -1,0 +1,102 @@
+name: Reconnoiter c4 k2 h7 macro terminals
+run-name: c4 k2 h7 macro reconnaissance
+
+on:
+  push:
+    branches: [codex/c4-h7-macro-recon]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: c4-h7-macro-recon-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  recon:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Run focused unit tests
+        run: |
+          python -m unittest discover -s tests -p 'test_c4_h7_macro_recon.py' -v
+          python tests/test_c4_h7_macro_recon_independent.py
+      - name: Generate the bounded macro report
+        run: |
+          mkdir -p out
+          python scripts/c4_h7_macro_recon.py \
+            --json out/report.json \
+            --markdown out/report.md \
+            --max-reverse-depth 1
+      - name: Independently validate the expected census
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          report = json.loads(Path("out/report.json").read_text(encoding="utf-8"))
+          expected = {
+              "tq": 71,
+              "d2_3plus1": 265,
+              "d2_2plus2": 661,
+              "total": 997,
+          }
+          actual = report.get("counts")
+          if actual != expected:
+            raise SystemExit(f"terminal census mismatch: expected {expected}, got {actual}")
+          reverse = report.get("reverse", {})
+          expected_reverse = {
+              "canonical_predecessors": 6375,
+              "canonical_edges": 12224,
+          }
+          actual_reverse = {key: reverse.get(key) for key in expected_reverse}
+          if actual_reverse != expected_reverse:
+            raise SystemExit(
+                f"live reverse census mismatch: expected {expected_reverse}, "
+                f"got {actual_reverse}"
+            )
+          bridge = reverse.get("tq_exhausting_bridge", {})
+          expected_bridge = {
+              "labeled_candidates": 624,
+              "canonical_predecessors": 418,
+              "canonical_edges": 429,
+          }
+          actual_bridge = {key: bridge.get(key) for key in expected_bridge}
+          if actual_bridge != expected_bridge:
+            raise SystemExit(
+                f"Tq bridge census mismatch: expected {expected_bridge}, "
+                f"got {actual_bridge}"
+            )
+          if report.get("verified") is not True:
+            raise SystemExit("report did not set verified=true")
+          print("verified terminal census: 71 + 265 + 661 = 997")
+          print("verified live reverse census: 6375 predecessors / 12224 edges")
+          print("verified Tq exhaustion bridge: 624 labeled / 418 parents / 429 edges")
+          PY
+      - name: Create and verify SHA-256 manifest
+        run: |
+          sha256sum out/report.json out/report.md > out/SHA256SUMS
+          sha256sum --check out/SHA256SUMS
+      - name: Add report to the run summary
+        if: always()
+        run: |
+          if test -f out/report.md; then
+            cat out/report.md >> "$GITHUB_STEP_SUMMARY"
+          fi
+          if test -f out/SHA256SUMS; then
+            echo '```text' >> "$GITHUB_STEP_SUMMARY"
+            cat out/SHA256SUMS >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: c4-h7-macro-recon-${{ github.run_id }}
+          path: out/
+          if-no-files-found: error
+          retention-days: 30
