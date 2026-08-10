@@ -238,6 +238,87 @@ def expected_transition_count(height: int) -> int:
     return 2 * height * (height - 1) ** 3 * (height + 2)
 
 
+def expected_column_lex_prefix_count(height: int) -> int:
+    return (COLOR_COUNT - 1) * (height - 1)
+
+
+def expected_column_lex_clause_count(height: int) -> int:
+    # Per adjacent pair: 6h lex clauses, 8 clauses for the first prefix,
+    # and 9 clauses for each of the remaining h-2 prefix recurrences.
+    return (COLOR_COUNT - 1) * (15 * height - 10)
+
+
+def encode_adjacent_column_lex(
+    writer: ClauseWriter,
+    pool: VariablePool,
+    left: Sequence[Sequence[int]],
+    right: Sequence[Sequence[int]],
+) -> int:
+    """Require one top-to-bottom column word to be at most the next one.
+
+    ``prefix_equal[p-1]`` means that positions ``0..p-1`` are equal.  The
+    equivalences below rely on the separately encoded one-hot item colours.
+    The returned value is the number of auxiliary prefix variables.
+    """
+    if len(left) != len(right) or len(left) < 2:
+        raise GenerationError("column lex words must have one common height >= 2")
+    if any(
+        len(left_position) != COLOR_COUNT
+        or len(right_position) != COLOR_COUNT
+        for left_position, right_position in zip(left, right)
+    ):
+        raise GenerationError("column lex positions must contain four colours")
+
+    height = len(left)
+    prefix_equal = [pool.new() for _position in range(1, height)]
+
+    # At the first position the empty prefix is unconditionally equal.
+    for left_color in range(COLOR_COUNT):
+        for right_color in range(left_color):
+            writer.add([-left[0][left_color], -right[0][right_color]])
+
+    # e_1 <=> (left[0] == right[0]).  One direction of the one-hot colour
+    # equivalence is sufficient because both positions select one colour.
+    first_equal = prefix_equal[0]
+    for color in range(COLOR_COUNT):
+        writer.add([-first_equal, -left[0][color], right[0][color]])
+        writer.add([-left[0][color], -right[0][color], first_equal])
+
+    # e_{p+1} <=> e_p and (left[p] == right[p]).
+    for position in range(1, height - 1):
+        previous_equal = prefix_equal[position - 1]
+        next_equal = prefix_equal[position]
+        writer.add([-next_equal, previous_equal])
+        for color in range(COLOR_COUNT):
+            writer.add(
+                [-next_equal, -left[position][color], right[position][color]]
+            )
+            writer.add(
+                [
+                    -previous_equal,
+                    -left[position][color],
+                    -right[position][color],
+                    next_equal,
+                ]
+            )
+
+    # If all earlier positions agree, a descending first difference is
+    # forbidden.  Differences after an earlier strict increase are irrelevant.
+    for position in range(1, height):
+        equal_before = prefix_equal[position - 1]
+        for left_color in range(COLOR_COUNT):
+            for right_color in range(left_color):
+                writer.add(
+                    [
+                        -equal_before,
+                        -left[position][left_color],
+                        -right[position][right_color],
+                    ]
+                )
+
+    return len(prefix_equal)
+
+
 def generate(args: argparse.Namespace) -> None:
     height = args.height
     if not 2 <= height <= 16:
@@ -334,6 +415,29 @@ def generate(args: argparse.Namespace) -> None:
                             earlier[color - 1] for earlier in flattened[:index]
                         ]]
                     )
+
+            # These two breakers are jointly safe: choose the globally least
+            # flattened word in the S_4(columns) x S_4(colours) orbit.  Its
+            # colours obey first-occurrence naming, and its column words are
+            # nondecreasing in top-to-bottom lexicographic order.
+            lex_clause_start = writer.clauses
+            for column in range(COLOR_COUNT - 1):
+                categories["column_lex_prefix"] = (
+                    categories.get("column_lex_prefix", 0)
+                    + encode_adjacent_column_lex(
+                        writer, pool, item[column], item[column + 1]
+                    )
+                )
+            column_lex_clauses = writer.clauses - lex_clause_start
+            if categories["column_lex_prefix"] != expected_column_lex_prefix_count(
+                height
+            ):
+                raise GenerationError("internal column-lex variable count mismatch")
+            if column_lex_clauses != expected_column_lex_clause_count(height):
+                raise GenerationError("internal column-lex clause count mismatch")
+        else:
+            categories["column_lex_prefix"] = 0
+            column_lex_clauses = 0
 
         if fixed_layout is not None:
             for column in range(COLOR_COUNT):
@@ -478,6 +582,15 @@ def generate(args: argparse.Namespace) -> None:
         },
         "orientation": "top-to-bottom",
         "symmetry_breaking": symmetry_breaking,
+        "symmetry": {
+            "color_first_occurrence": symmetry_breaking,
+            "column_lexicographic_nondecreasing": symmetry_breaking,
+            "column_lex_orientation": "top-to-bottom",
+            "column_lex_prefix_variables": categories["column_lex_prefix"],
+            "column_lex_clauses": column_lex_clauses,
+            "joint_group": "S4(columns) x S4(colors)",
+            "representative": "lexicographically least flattened orbit word",
+        },
         "fixed_instance": (
             {
                 "path": str(args.fix_instance),

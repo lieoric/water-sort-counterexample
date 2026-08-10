@@ -13,6 +13,7 @@ on:
       - scripts/c4_trap_cnf.py
       - scripts/c4_trap_cnf_requirements.txt
       - scripts/run_c4_trap_cnf.py
+      - tests/test_c4_trap_cnf.py
       - apps/oracle.cpp
       - apps/verify.cpp
       - experiments/c4-k2-h8-no-000.txt
@@ -76,6 +77,7 @@ jobs:
       - name: Statically check the exact generator and runner
         run: |
           python -m py_compile scripts/c4_trap_cnf.py scripts/run_c4_trap_cnf.py
+          python -m unittest tests/test_c4_trap_cnf.py -v
           python scripts/c4_trap_cnf.py --help
           python scripts/run_c4_trap_cnf.py --help
       - name: Generate a tiny structural smoke formula
@@ -89,6 +91,9 @@ jobs:
           jq -e '
             .counts.non_goal_states == 5 and
             .counts.guarded_transitions == 16 and
+            .counts.variable_categories.column_lex_prefix == 3 and
+            .symmetry.column_lex_prefix_variables == 3 and
+            .symmetry.column_lex_clauses == 60 and
             .expected.non_goal_states == 5 and
             .expected.guarded_transitions == 16
           ' smoke/metadata.json
