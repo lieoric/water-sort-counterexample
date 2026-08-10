@@ -1,0 +1,176 @@
+name: Audit c4 h7 two-source D2 residuals
+run-name: Exact c4 k2 h7 two-legal-source D2 fixed-word audit
+
+on:
+  push:
+    branches: [codex/c4-h7-d2-legal2]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: c4-h7-d2-two-source-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-bounded-audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Configure Release with warnings as errors
+        run: >-
+          cmake -S . -B build
+          -DCMAKE_BUILD_TYPE=Release
+          -DWSC_WARNINGS_AS_ERRORS=ON
+      - name: Build the focused executable
+        run: >-
+          cmake --build build
+          --target water-c4-h7-d2-two-source
+          --parallel 2
+      - name: Run the focused C++ test
+        run: >-
+          ctest --test-dir build --output-on-failure
+          --no-tests=error
+          -R '^water-c4-h7-d2-two-source-smoke$'
+      - name: Run the built-in structural self-test
+        run: |
+          mkdir -p out/build-audit
+          set -o pipefail
+          build/water-c4-h7-d2-two-source --self-test 2>&1 \
+            | tee out/build-audit/self-test.log
+      - name: Independently rebuild and differentially check across both edges
+        run: |
+          set -o pipefail
+          python tests/check_c4_h7_d2_two_source.py \
+            --program build/water-c4-h7-d2-two-source \
+            --limit 930 \
+            --json out/build-audit/independent-930.json 2>&1 \
+            | tee out/build-audit/independent-930.log
+      - name: Preserve and strictly validate a bounded report
+        run: |
+          build/water-c4-h7-d2-two-source \
+            --limit 930 --output-dir out/build-audit/bounded
+          python scripts/validate_c4_h7_d2_two_source_report.py \
+            out/build-audit/bounded/report.json --negative-tests
+          test "$(python -c 'import json; print(json.load(open("out/build-audit/bounded/report.json"))["status"])')" = INCOMPLETE
+      - name: Configure Clang ASan and UBSan
+        run: >-
+          cmake -S . -B build-sanitize
+          -DCMAKE_BUILD_TYPE=Debug
+          -DCMAKE_CXX_COMPILER=clang++
+          -DWSC_WARNINGS_AS_ERRORS=ON
+          -DCMAKE_CXX_FLAGS='-fsanitize=address,undefined -fno-omit-frame-pointer'
+          -DCMAKE_EXE_LINKER_FLAGS='-fsanitize=address,undefined'
+      - name: Run the sanitizer structural test
+        env:
+          ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+        run: |
+          cmake --build build-sanitize \
+            --target water-c4-h7-d2-two-source --parallel 2
+          build-sanitize/water-c4-h7-d2-two-source --self-test
+      - name: Create and verify the bounded SHA-256 manifest
+        if: always()
+        run: |
+          mkdir -p out/build-audit
+          find out/build-audit -type f ! -name SHA256SUMS -print0 \
+            | sort -z \
+            | xargs -0 -r sha256sum > out/build-audit/SHA256SUMS
+          sha256sum --check out/build-audit/SHA256SUMS
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: c4-h7-d2-two-source-build-audit-${{ github.run_id }}
+          path: out/build-audit/
+          if-no-files-found: error
+          retention-days: 30
+
+  full-fixed-word-and-water-audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Configure and build Release with warnings as errors
+        run: |
+          cmake -S . -B build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DWSC_WARNINGS_AS_ERRORS=ON
+          cmake --build build \
+            --target water-c4-h7-d2-two-source water-oracle water-verify \
+            --parallel 2
+      - name: Classify all 12936 fixed words and 258720 zero-debt layouts
+        run: |
+          mkdir -p out/full
+          set -o pipefail
+          build/water-c4-h7-d2-two-source \
+            --output-dir out/full 2>&1 | tee out/full/run.log
+      - name: Independently rebuild, solve, and compare the complete universe
+        run: |
+          set -o pipefail
+          python tests/check_c4_h7_d2_two_source.py \
+            --report out/full/report.json \
+            --json out/full/independent-audit.json 2>&1 \
+            | tee out/full/independent.log
+      - name: Strictly validate status, schema, and claim boundaries
+        run: |
+          python scripts/validate_c4_h7_d2_two_source_report.py \
+            out/full/report.json --negative-tests
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          report = json.loads(Path("out/full/report.json").read_text())
+          Path("out/full/status.txt").write_text(report["status"] + "\n")
+          PY
+      - name: Independently certify any complete-layout global NO
+        run: |
+          status=$(tr -d '\r\n' < out/full/status.txt)
+          if test "$status" = "GLOBAL_NO_FOUND"; then
+            set -o pipefail
+            build/water-oracle \
+              --input out/full/global-no-candidate.txt \
+              --count 1 \
+              --certificate out/full/global-no-candidate.wscert 2>&1 \
+              | tee out/full/oracle.log
+            grep -q '^border_sequences=0 ' out/full/oracle.log
+            grep -qx 'UNSOLVABLE' out/full/oracle.log
+            test -s out/full/global-no-candidate.wscert
+            build/water-verify \
+              --input out/full/global-no-candidate.txt \
+              --certificate out/full/global-no-candidate.wscert 2>&1 \
+              | tee out/full/verifier.log
+            grep -qx 'VALID NO CERTIFICATE' out/full/verifier.log
+          elif test "$status" != "TWO_SOURCE_D2_FAMILY_ELIMINATED"; then
+            echo "unexpected full-audit status: $status" >&2
+            exit 1
+          fi
+      - name: Record the intentionally narrow conclusion
+        run: |
+          status=$(tr -d '\r\n' < out/full/status.txt)
+          if test "$status" = "TWO_SOURCE_D2_FAMILY_ELIMINATED"; then
+            echo '> All 12,936 edge-summed fixed futures are parent-checkpoint local NO, but all 258,720 reconstructed zero-debt layouts are YES. This eliminates only the 190 two-legal-source D2-reduction decorations, not the remaining D2 family or all c4/k2/h7 layouts.' >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo '> A zero-debt balanced 4x7 layout is exact-DP NO and has been independently checked by water-oracle plus water-verify. The parent checkpoint alone was not treated as a global counterexample.' >> "$GITHUB_STEP_SUMMARY"
+          fi
+          cat out/full/report.md >> "$GITHUB_STEP_SUMMARY"
+      - name: Create and verify the full SHA-256 manifest
+        if: always()
+        run: |
+          find out/full -type f ! -name SHA256SUMS -print0 \
+            | sort -z \
+            | xargs -0 -r sha256sum > out/full/SHA256SUMS
+          sha256sum --check out/full/SHA256SUMS
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: c4-h7-d2-two-source-full-${{ github.run_id }}
+          path: out/full/
+          if-no-files-found: error
+          retention-days: 30
