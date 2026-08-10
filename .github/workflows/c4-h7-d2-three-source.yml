@@ -1,0 +1,188 @@
+name: Audit c4 h7 three-source D2 checkpoints
+run-name: Exact c4 k2 h7 three-legal-source fixed-future checkpoint audit
+
+on:
+  push:
+    branches: [codex/c4-h7-global-bypass]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: c4-h7-d2-three-source-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-bounded-differential:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Configure Release with warnings as errors
+        run: >-
+          cmake -S . -B build
+          -DCMAKE_BUILD_TYPE=Release
+          -DWSC_WARNINGS_AS_ERRORS=ON
+      - name: Build the focused executable
+        run: >-
+          cmake --build build
+          --target water-c4-h7-d2-three-source
+          --parallel 2
+      - name: Run the focused C++ smoke test
+        run: >-
+          ctest --test-dir build --output-on-failure
+          --no-tests=error
+          -R '^water-c4-h7-d2-three-source-smoke$'
+      - name: Differentially rebuild and solve a bounded prefix
+        run: |
+          mkdir -p out/bounded
+          set -o pipefail
+          python tests/check_c4_h7_d2_three_source.py \
+            --program build/water-c4-h7-d2-three-source \
+            --limit 64 \
+            --json out/bounded/independent-64.json 2>&1 \
+            | tee out/bounded/independent-64.log
+      - name: Preserve and strictly validate the same bounded prefix
+        run: |
+          set -o pipefail
+          build/water-c4-h7-d2-three-source \
+            --self-test --limit 64 --output-dir out/bounded/production 2>&1 \
+            | tee out/bounded/production.log
+          python scripts/validate_c4_h7_d2_three_source_report.py \
+            out/bounded/production/report.json --negative-tests
+          test "$(python -c 'import json; print(json.load(open("out/bounded/production/report.json"))["status"])')" = INCOMPLETE
+      - name: Configure Clang ASan and UBSan
+        run: >-
+          cmake -S . -B build-sanitize
+          -DCMAKE_BUILD_TYPE=Debug
+          -DCMAKE_CXX_COMPILER=clang++
+          -DWSC_WARNINGS_AS_ERRORS=ON
+          -DCMAKE_CXX_FLAGS='-fsanitize=address,undefined -fno-omit-frame-pointer'
+          -DCMAKE_EXE_LINKER_FLAGS='-fsanitize=address,undefined'
+      - name: Run bounded sanitizer self-tests
+        env:
+          ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+        run: |
+          cmake --build build-sanitize \
+            --target water-c4-h7-d2-three-source --parallel 2
+          build-sanitize/water-c4-h7-d2-three-source \
+            --self-test --limit 8 --output-dir out/bounded/sanitized
+      - name: Create and verify the bounded SHA-256 manifest
+        if: always()
+        run: |
+          mkdir -p out/bounded
+          find out/bounded -type f ! -name SHA256SUMS -print0 \
+            | sort -z \
+            | xargs -0 -r sha256sum > out/bounded/SHA256SUMS
+          sha256sum --check out/bounded/SHA256SUMS
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: c4-h7-d2-three-source-bounded-${{ github.run_id }}
+          path: out/bounded/
+          if-no-files-found: error
+          retention-days: 30
+
+  full-fixed-future-checkpoint-audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Configure and build Release with warnings as errors
+        run: |
+          cmake -S . -B build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DWSC_WARNINGS_AS_ERRORS=ON
+          cmake --build build \
+            --target water-c4-h7-d2-three-source --parallel 2
+      - name: Enumerate and solve all 1106490 fixed futures
+        run: |
+          mkdir -p out/full
+          set -o pipefail
+          build/water-c4-h7-d2-three-source \
+            --self-test --output-dir out/full 2>&1 \
+            | tee out/full/production.log
+      - name: Strictly validate schema, ledgers, and claim boundaries
+        run: |
+          python scripts/validate_c4_h7_d2_three_source_report.py \
+            out/full/report.json --negative-tests
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          report = json.loads(Path("out/full/report.json").read_text())
+          if report["status"] != "LOCAL_NO_RESIDUALS_EXPORTED":
+              raise SystemExit(f"unexpected full status: {report['status']}")
+          if report["claims"] != {
+              "three_source_checkpoint_family_eliminated": False,
+              "zero_debt_initial_family_eliminated": False,
+              "universal_c4_h7_solvability": False,
+          }:
+              raise SystemExit("full report crossed its checkpoint-only claim boundary")
+          Path("out/full/status.txt").write_text(report["status"] + "\n")
+          PY
+      - name: Independently rebuild, solve, and compare every fixed future
+        run: |
+          set -o pipefail
+          python tests/check_c4_h7_d2_three_source.py \
+            --report out/full/report.json \
+            --json out/full/independent-audit.json \
+            --local-no-ledger out/full/independent-local-no-ledger.jsonl 2>&1 \
+            | tee out/full/independent.log
+      - name: Verify independent NO rows remain explicitly local-only
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          path = Path("out/full/independent-local-no-ledger.jsonl")
+          rows = [json.loads(line) for line in path.read_text().splitlines()]
+          if not rows:
+              raise SystemExit("expected at least one independently reproduced checkpoint local NO")
+          for index, row in enumerate(rows):
+              if row.get("scope") != "nonzero_debt_parent_checkpoint_fixed_future":
+                  raise SystemExit(f"independent NO {index} lost its local scope")
+              if row.get("zero_debt_past_restored") is not False:
+                  raise SystemExit(f"independent NO {index} claims restored zero debt")
+              if row.get("global_counterexample") is not False:
+                  raise SystemExit(f"independent NO {index} claims a global counterexample")
+          report = json.loads(Path("out/full/report.json").read_text())
+          if len(rows) != report["run"]["local_no"]:
+              raise SystemExit("independent local-NO ledger count drifted")
+          PY
+      - name: Record the intentionally narrow conclusion
+        run: |
+          python - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+          import json
+          from pathlib import Path
+
+          report = json.loads(Path("out/full/report.json").read_text())
+          print("> Exact full result: "
+                f"{report['run']['local_no']} of {report['run']['fixed_futures_checked']} "
+                "fixed futures are local NO at nonzero-debt parent checkpoints. "
+                "They are exported for a later zero-debt past-restoration analysis; "
+                "this job proves no balanced initial-layout NO and no global c4/h7 theorem.")
+          PY
+          cat out/full/report.md >> "$GITHUB_STEP_SUMMARY"
+      - name: Create and verify the full SHA-256 manifest
+        if: always()
+        run: |
+          find out/full -type f ! -name SHA256SUMS -print0 \
+            | sort -z \
+            | xargs -0 -r sha256sum > out/full/SHA256SUMS
+          sha256sum --check out/full/SHA256SUMS
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: c4-h7-d2-three-source-full-${{ github.run_id }}
+          path: out/full/
+          if-no-files-found: error
+          retention-days: 30
