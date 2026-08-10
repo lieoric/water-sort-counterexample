@@ -74,6 +74,20 @@ target_link_libraries(water-continuous-control PRIVATE water_sort)
 add_executable(water-counter-game apps/counter_game.cpp)
 target_link_libraries(water-counter-game PRIVATE water_sort)
 
+add_executable(water-c4-h7-tq-gate-check apps/c4_h7_tq_gate_check.cpp)
+target_link_libraries(water-c4-h7-tq-gate-check PRIVATE water_sort)
+if(MSVC)
+    target_compile_options(water-c4-h7-tq-gate-check PRIVATE /W4)
+    if(WSC_WARNINGS_AS_ERRORS)
+        target_compile_options(water-c4-h7-tq-gate-check PRIVATE /WX)
+    endif()
+else()
+    target_compile_options(water-c4-h7-tq-gate-check PRIVATE -Wall -Wextra -Wpedantic)
+    if(WSC_WARNINGS_AS_ERRORS)
+        target_compile_options(water-c4-h7-tq-gate-check PRIVATE -Werror)
+    endif()
+endif()
+
 include(CTest)
 if(BUILD_TESTING)
     add_executable(water-sort-tests tests/test_main.cpp)
@@ -215,6 +229,11 @@ if(BUILD_TESTING)
             --self-test
             --report ${CMAKE_CURRENT_BINARY_DIR}/test-counter-next/report.json
             --witness ${CMAKE_CURRENT_BINARY_DIR}/test-counter-next/witness.txt)
+    add_test(NAME water-c4-h7-tq-gate-check-smoke
+        COMMAND water-c4-h7-tq-gate-check
+            --self-test
+            --limit 100
+            --output-dir ${CMAKE_CURRENT_BINARY_DIR}/test-c4-h7-tq-gate-output)
     function(add_counter_game_regression NAME CASE_NAME)
         add_test(NAME ${NAME}
             COMMAND ${CMAKE_COMMAND}

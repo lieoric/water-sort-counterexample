@@ -1,0 +1,176 @@
+name: Check the c4 k2 h7 Tq gate family
+run-name: Complete 381360-layout Tq gate check
+
+on:
+  push:
+    branches: [codex/c4-h7-tq-gate-check]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: c4-h7-tq-gate-check-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Configure the Release build
+        run: >-
+          cmake -S . -B build
+          -DCMAKE_BUILD_TYPE=Release
+          -DWSC_WARNINGS_AS_ERRORS=ON
+      - name: Build the targeted checker and independent oracles
+        run: >-
+          cmake --build build
+          --target water-c4-h7-tq-gate-check water-oracle water-verify
+          --parallel 2
+      - name: Run the focused C++ unit test
+        run: >-
+          ctest --test-dir build --output-on-failure
+          --no-tests=error
+          -R '^water-c4-h7-tq-gate-check-smoke$'
+      - name: Run the independent Python checker
+        run: |
+          python tests/check_c4_h7_tq_gate.py \
+            --program build/water-c4-h7-tq-gate-check \
+            --oracle build/water-oracle
+      - name: Check all 381360 targeted layouts
+        run: |
+          mkdir -p out
+          set -o pipefail
+          build/water-c4-h7-tq-gate-check --output-dir out 2>&1 | tee out/run.log
+      - name: Independently audit the complete report
+        run: >-
+          python tests/check_c4_h7_tq_gate.py
+          --report out/report.json
+      - name: Strictly validate the completed report
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          expected = 381_360
+          report_path = Path("out/report.json")
+          markdown_path = Path("out/report.md")
+          if not report_path.is_file() or not markdown_path.is_file():
+            raise SystemExit("missing report.json or report.md")
+
+          report = json.loads(report_path.read_text(encoding="utf-8"))
+          status = report.get("status")
+          expected_in_report = report.get("labeled_layouts_expected")
+          checked = report.get("labeled_layouts_checked")
+          unique = report.get("unique_layouts_checked")
+          yes_count = report.get("yes_count")
+          no_count = report.get("no_count")
+
+          if expected_in_report != expected:
+            raise SystemExit(
+                f"expected-layout census mismatch: expected {expected}, "
+                f"got {expected_in_report}"
+            )
+          expected_local_census = {
+              "candidate_pairs_total": 15,
+              "nonzero_losing_pairs": 11,
+              "zero_losing_pairs": 4,
+              "local_losing_decorations": 2_226,
+              "per_u_prefix_arrangements": {"1": 60, "2": 140, "3": 280},
+          }
+          actual_local_census = {
+              key: report.get(key) for key in expected_local_census
+          }
+          if actual_local_census != expected_local_census:
+            raise SystemExit(
+                f"local Tq census mismatch: expected {expected_local_census}, "
+                f"got {actual_local_census}"
+            )
+          if not isinstance(checked, int) or not 0 < checked <= expected:
+            raise SystemExit(f"invalid labeled_layouts_checked: {checked}")
+          if not isinstance(unique, int) or not 0 < unique <= checked:
+            raise SystemExit(f"invalid unique_layouts_checked: {unique}")
+          if not isinstance(yes_count, int) or not 0 <= yes_count <= checked:
+            raise SystemExit(f"invalid yes_count: {yes_count}")
+          if not isinstance(no_count, int) or not 0 <= no_count <= checked:
+            raise SystemExit(f"invalid no_count: {no_count}")
+          if yes_count + no_count != checked:
+            raise SystemExit(
+                f"classification census does not sum to checked: "
+                f"yes={yes_count}, no={no_count}, checked={checked}"
+            )
+
+          if status == "ALL_YES":
+            if report.get("verified") is not True:
+              raise SystemExit("ALL_YES report did not set verified=true")
+            if report.get("universe_complete") is not True:
+              raise SystemExit("ALL_YES report did not complete the universe")
+            if checked != expected or yes_count != expected or no_count != 0:
+              raise SystemExit(
+                  f"incomplete ALL_YES report: checked={checked}, "
+                  f"yes_count={yes_count}, no_count={no_count}"
+              )
+          elif status == "NO_FOUND":
+            if report.get("verified") is not True:
+              raise SystemExit("NO_FOUND report did not set verified=true")
+            if report.get("universe_complete") is not False:
+              raise SystemExit("NO_FOUND report incorrectly claims a complete universe")
+            if no_count < 1:
+              raise SystemExit("NO_FOUND report has no reported NO")
+            if not Path("out/no-instance.txt").is_file():
+              raise SystemExit("NO_FOUND report did not save out/no-instance.txt")
+          else:
+            raise SystemExit(f"unexpected or incomplete status: {status!r}")
+
+          Path("out/status.txt").write_text(status + "\n", encoding="utf-8")
+          print(
+              f"validated status={status}, labeled={checked}/{expected}, "
+              f"unique={unique}, no_count={no_count}"
+          )
+          PY
+      - name: Independently certify any reported NO
+        run: |
+          status=$(tr -d '\r\n' < out/status.txt)
+          if test "$status" = "NO_FOUND"; then
+            set -o pipefail
+            build/water-oracle \
+              --input out/no-instance.txt \
+              --count 1 \
+              --certificate out/no-instance.wscert 2>&1 | tee out/oracle.log
+            grep -q '^border_sequences=0 ' out/oracle.log
+            grep -qx 'UNSOLVABLE' out/oracle.log
+            test -s out/no-instance.wscert
+            build/water-verify \
+              --input out/no-instance.txt \
+              --certificate out/no-instance.wscert 2>&1 | tee out/verifier.log
+            grep -qx 'VALID NO CERTIFICATE' out/verifier.log
+          fi
+      - name: Create and verify the SHA-256 manifest
+        run: |
+          find out -maxdepth 1 -type f ! -name SHA256SUMS -print0 \
+            | sort -z \
+            | xargs -0 sha256sum > out/SHA256SUMS
+          sha256sum --check out/SHA256SUMS
+      - name: Add the result to the run summary
+        if: always()
+        run: |
+          if test -f out/report.md; then
+            cat out/report.md >> "$GITHUB_STEP_SUMMARY"
+          fi
+          if test -f out/SHA256SUMS; then
+            echo '```text' >> "$GITHUB_STEP_SUMMARY"
+            cat out/SHA256SUMS >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: c4-h7-tq-gate-check-${{ github.run_id }}
+          path: out/
+          if-no-files-found: error
+          retention-days: 30
