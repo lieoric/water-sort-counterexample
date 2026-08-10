@@ -153,3 +153,20 @@ runs the five `h=7` shards in parallel, archives every DIMACS/proof or SAT
 witness, and publishes a small aggregate result.  Every shard must have either
 an accepted DRAT check or both independent Water Sort SAT-witness checks before
 the workflow can accept the aggregate.
+
+## Certified height-7 result
+
+[GitHub Actions run 31433207763](https://github.com/lieoric/water-sort-counterexample/actions/runs/31433207763),
+at commit `c11573190eaaf3b38327e016d97eda4c15bb81aa`, completed all five
+RGS shards `000`, `001`, `010`, `011`, and `012`.  Every shard ended as
+`UNSAT_VERIFIED`: CaDiCaL returned UNSAT, the pinned independent `drat-trim`
+returned `s VERIFIED`, and the complete DIMACS and proof were archived.  The
+aggregator independently checked that these five prefixes exactly cover all 64
+assignments to the first three flattened cells, with no missing or SAT shard.
+
+The aggregate result is therefore `UNSAT_VERIFIED`.  By the equivalence in
+[Closed trap](#closed-trap), there is no unsolvable balanced fixed layout with
+four capacity-7 full columns, two capacity-7 empty columns, and four colours
+appearing seven times each under forced maximal pours.  This is a fixed-layout
+theorem; it does not assert a uniform online policy for adversarial hidden
+futures.

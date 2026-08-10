@@ -137,10 +137,12 @@ E(4,h,2) holds for every h >= 8.
 ```
 
 The audited next-run game proves every balanced four-color instance through
-height 6 solvable. Thus the minimum four-color/two-empty obstruction height is
-currently narrowed to `7 <= h_min <= 8`. Every direct balanced one-layer
-deletion of all three committed height-8 witnesses is solvable, but that local fact
-does not exclude an unrelated height-7 obstruction.
+height 6 solvable.  The exact fixed-layout trap encoding now also excludes every
+height-7 obstruction: all five disjoint RGS shards were proved UNSAT by CaDiCaL,
+and every DRAT proof was independently accepted by `drat-trim` in
+[GitHub Actions run 31433207763](https://github.com/lieoric/water-sort-counterexample/actions/runs/31433207763).
+Together with the independently certified height-8 witnesses, this makes the
+minimum balanced four-color/two-empty obstruction height exactly `h_min = 8`.
 
 ## What is implemented
 
