@@ -102,6 +102,19 @@ else()
     endif()
 endif()
 
+add_executable(water-c4-h7-tq-exhaust-siblings apps/c4_h7_tq_exhaust_siblings.cpp)
+if(MSVC)
+    target_compile_options(water-c4-h7-tq-exhaust-siblings PRIVATE /W4)
+    if(WSC_WARNINGS_AS_ERRORS)
+        target_compile_options(water-c4-h7-tq-exhaust-siblings PRIVATE /WX)
+    endif()
+else()
+    target_compile_options(water-c4-h7-tq-exhaust-siblings PRIVATE -Wall -Wextra -Wpedantic)
+    if(WSC_WARNINGS_AS_ERRORS)
+        target_compile_options(water-c4-h7-tq-exhaust-siblings PRIVATE -Werror)
+    endif()
+endif()
+
 include(CTest)
 if(BUILD_TESTING)
     add_executable(water-sort-tests tests/test_main.cpp)
@@ -114,6 +127,11 @@ if(BUILD_TESTING)
             --self-test
             --limit 64
             --output-dir ${CMAKE_CURRENT_BINARY_DIR}/test-c4-h7-tq-sibling-forks-output)
+    add_test(NAME water-c4-h7-tq-exhaust-siblings-smoke
+        COMMAND water-c4-h7-tq-exhaust-siblings
+            --self-test
+            --limit 64
+            --output-dir ${CMAKE_CURRENT_BINARY_DIR}/test-c4-h7-tq-exhaust-siblings-output)
     file(GLOB WSC_EXPERIMENT_INSTANCES "${CMAKE_CURRENT_SOURCE_DIR}/experiments/*.txt")
     foreach(WSC_EXPERIMENT_INSTANCE IN LISTS WSC_EXPERIMENT_INSTANCES)
         get_filename_component(WSC_EXPERIMENT_NAME ${WSC_EXPERIMENT_INSTANCE} NAME_WE)

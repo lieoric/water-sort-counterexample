@@ -1,0 +1,149 @@
+name: Census first-exhaustion Tq sibling forks
+run-name: Audit the c4 k2 h7 first-exhaustion Tq next-run universe
+
+on:
+  push:
+    branches: [codex/c4-h7-tq-exhaust-siblings]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: c4-h7-tq-exhaust-siblings-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Configure the Release build
+        run: >-
+          cmake -S . -B build
+          -DCMAKE_BUILD_TYPE=Release
+          -DWSC_WARNINGS_AS_ERRORS=ON
+      - name: Build the focused census program
+        run: >-
+          cmake --build build
+          --target water-c4-h7-tq-exhaust-siblings
+          --parallel 2
+      - name: Run its focused C++ test
+        run: >-
+          ctest --test-dir build --output-on-failure
+          --no-tests=error
+          -R '^water-c4-h7-tq-exhaust-siblings-smoke$'
+      - name: Run the built-in structural self-test
+        run: |
+          mkdir -p out/build-audit
+          set -o pipefail
+          build/water-c4-h7-tq-exhaust-siblings --self-test 2>&1 \
+            | tee out/build-audit/self-test.log
+      - name: Independently rebuild the census and run a bounded differential
+        run: |
+          set -o pipefail
+          python tests/check_c4_h7_tq_exhaust_siblings.py \
+            --program build/water-c4-h7-tq-exhaust-siblings \
+            --limit 257 \
+            --json out/build-audit/independent-audit.json 2>&1 \
+            | tee out/build-audit/independent.log
+      - name: Preserve a bounded artifact for strict validation
+        run: >-
+          build/water-c4-h7-tq-exhaust-siblings
+          --limit 257
+          --output-dir out/build-audit/bounded
+      - name: Strictly reject claims beyond the bounded run
+        run: >-
+          python scripts/validate_c4_h7_tq_exhaust_siblings_report.py
+          --report out/build-audit/bounded/report.json
+          --output-dir out/build-audit/bounded
+          --audit out/build-audit/independent-audit.json
+          --status-file out/build-audit/bounded/status.txt
+      - name: Confirm the bounded status
+        run: test "$(tr -d '\r\n' < out/build-audit/bounded/status.txt)" = INCOMPLETE
+      - name: Configure the Clang sanitizer smoke build
+        run: >-
+          cmake -S . -B build-sanitize
+          -DCMAKE_BUILD_TYPE=Debug
+          -DCMAKE_CXX_COMPILER=clang++
+          -DWSC_WARNINGS_AS_ERRORS=ON
+          -DCMAKE_CXX_FLAGS='-fsanitize=address,undefined -fno-omit-frame-pointer'
+          -DCMAKE_EXE_LINKER_FLAGS='-fsanitize=address,undefined'
+      - name: Build and run the sanitizer smoke test
+        env:
+          ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+        run: |
+          cmake --build build-sanitize \
+            --target water-c4-h7-tq-exhaust-siblings --parallel 2
+          build-sanitize/water-c4-h7-tq-exhaust-siblings --self-test
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: c4-h7-tq-exhaust-build-audit-${{ github.run_id }}
+          path: out/build-audit/
+          if-no-files-found: error
+          retention-days: 30
+
+  next-run-census:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Configure and build the Release census program
+        run: |
+          cmake -S . -B build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DWSC_WARNINGS_AS_ERRORS=ON
+          cmake --build build \
+            --target water-c4-h7-tq-exhaust-siblings --parallel 2
+      - name: Enumerate all 1,256,148 next-run decorations
+        run: |
+          mkdir -p out/census
+          set -o pipefail
+          build/water-c4-h7-tq-exhaust-siblings \
+            --output-dir out/census 2>&1 | tee out/census/run.log
+      - name: Independently audit the complete report and replay its samples
+        run: |
+          set -o pipefail
+          python tests/check_c4_h7_tq_exhaust_siblings.py \
+            --report out/census/report.json \
+            --json out/census/independent-audit.json 2>&1 \
+            | tee out/census/independent.log
+      - name: Strictly validate status and claim boundaries
+        run: >-
+          python scripts/validate_c4_h7_tq_exhaust_siblings_report.py
+          --report out/census/report.json
+          --output-dir out/census
+          --audit out/census/independent-audit.json
+          --status-file out/census/status.txt
+      - name: Require the exact complete-census status
+        run: test "$(tr -d '\r\n' < out/census/status.txt)" = NEXT_RUN_CENSUS_COMPLETE
+      - name: Record the intentionally limited conclusion
+        run: |
+          cat >> "$GITHUB_STEP_SUMMARY" <<'EOF'
+          > This job completely enumerates the 1,256,148 committed next-run decorations only. It does not enumerate the 6,131,033,832 residual words, eliminate the entry family, or prove all c4/k2/h7 layouts solvable.
+          EOF
+          cat out/census/summary.md >> "$GITHUB_STEP_SUMMARY"
+      - name: Create and verify the SHA-256 manifest
+        if: always()
+        run: |
+          mkdir -p out/census
+          find out/census -type f ! -name SHA256SUMS -print0 \
+            | sort -z \
+            | xargs -0 -r sha256sum > out/census/SHA256SUMS
+          sha256sum --check out/census/SHA256SUMS
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: c4-h7-tq-exhaust-next-run-census-${{ github.run_id }}
+          path: out/census/
+          if-no-files-found: error
+          retention-days: 30
