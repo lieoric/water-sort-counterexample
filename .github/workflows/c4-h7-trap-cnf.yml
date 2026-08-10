@@ -7,7 +7,9 @@ on:
   # Until then, this branch-specific push performs the complete bootstrap run:
   # h8 first, then h6 and h7 only after the known h8 SAT case verifies.
   push:
-    branches: [codex/c4-h7-trap-cnf]
+    branches:
+      - codex/c4-h7-trap-cnf
+      - codex/c4-h7-column-lex-fallback
     paths:
       - .github/workflows/c4-h7-trap-cnf.yml
       - scripts/c4_trap_cnf.py
