@@ -154,6 +154,21 @@ else()
     endif()
 endif()
 
+add_executable(water-c4-h7-d2-three-source-past
+    apps/c4_h7_d2_three_source_past.cpp)
+if(MSVC)
+    target_compile_options(water-c4-h7-d2-three-source-past PRIVATE /W4)
+    if(WSC_WARNINGS_AS_ERRORS)
+        target_compile_options(water-c4-h7-d2-three-source-past PRIVATE /WX)
+    endif()
+else()
+    target_compile_options(water-c4-h7-d2-three-source-past PRIVATE
+        -Wall -Wextra -Wpedantic)
+    if(WSC_WARNINGS_AS_ERRORS)
+        target_compile_options(water-c4-h7-d2-three-source-past PRIVATE -Werror)
+    endif()
+endif()
+
 include(CTest)
 if(BUILD_TESTING)
     add_executable(water-sort-tests tests/test_main.cpp)
@@ -186,6 +201,8 @@ if(BUILD_TESTING)
             --self-test
             --limit 64
             --output-dir ${CMAKE_CURRENT_BINARY_DIR}/test-c4-h7-d2-three-source-output)
+    add_test(NAME water-c4-h7-d2-three-source-past-self-test
+        COMMAND water-c4-h7-d2-three-source-past --self-test)
     file(GLOB WSC_EXPERIMENT_INSTANCES "${CMAKE_CURRENT_SOURCE_DIR}/experiments/*.txt")
     foreach(WSC_EXPERIMENT_INSTANCE IN LISTS WSC_EXPERIMENT_INSTANCES)
         get_filename_component(WSC_EXPERIMENT_NAME ${WSC_EXPERIMENT_INSTANCE} NAME_WE)
