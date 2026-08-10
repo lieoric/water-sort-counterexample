@@ -132,9 +132,36 @@ class RestrictedGrowthShardCoverageTest(unittest.TestCase):
             "stages": stages,
         }
 
-    def all_results(self, status: str) -> list[tuple[str, dict[str, object]]]:
+    @staticmethod
+    def envelope(
+        prefix: str,
+        *,
+        runner_exit: str = "0",
+        compute_outcome: str = "success",
+        archive_outcome: str = "success",
+    ) -> dict[str, object]:
+        return {
+            "schema": 1,
+            "rgs_prefix": prefix,
+            "runner_exit": runner_exit,
+            "compute_outcome": compute_outcome,
+            "archive_outcome": archive_outcome,
+        }
+
+    def checked_result(
+        self, prefix: str, status: str
+    ) -> tuple[str, dict[str, object], dict[str, object]]:
+        return (
+            prefix,
+            self.shard_result(prefix, status),
+            self.envelope(prefix),
+        )
+
+    def all_results(
+        self, status: str
+    ) -> list[tuple[str, dict[str, object], dict[str, object]]]:
         return [
-            (prefix, self.shard_result(prefix, status))
+            self.checked_result(prefix, status)
             for prefix in RGS_LENGTH_THREE_PREFIXES
         ]
 
@@ -145,10 +172,19 @@ class RestrictedGrowthShardCoverageTest(unittest.TestCase):
 
     def test_one_verified_sat_shard_implies_global_sat(self) -> None:
         results = self.all_results(UNSAT_STATUS)
-        results[2] = ("010", self.shard_result("010", SAT_STATUS))
+        results[2] = self.checked_result("010", SAT_STATUS)
         aggregate = aggregate_results(results)
         self.assertEqual(aggregate["status"], SAT_STATUS)
         self.assertEqual(aggregate["sat_shards"], ["010"])
+
+        # SAT is existential: a single archived, independently verified NO
+        # witness decides the unrestricted formula even if every other shard
+        # timed out or never produced a summary.
+        aggregate = aggregate_results([self.checked_result("010", SAT_STATUS)])
+        self.assertEqual(aggregate["status"], SAT_STATUS)
+        self.assertEqual(
+            aggregate["missing_shards"], ["000", "001", "011", "012"]
+        )
 
     def test_missing_or_unverified_shard_is_never_accepted(self) -> None:
         with self.assertRaises(AggregationError):
@@ -159,6 +195,14 @@ class RestrictedGrowthShardCoverageTest(unittest.TestCase):
         with self.assertRaises(AggregationError):
             aggregate_results(results)
 
+        results = self.all_results(UNSAT_STATUS)
+        results[0][1]["verified"] = False
+        results[0][1]["status"] = "TIMEOUT"
+        results[0][2]["runner_exit"] = "124"
+        results[0][2]["compute_outcome"] = "failure"
+        with self.assertRaises(AggregationError):
+            aggregate_results(results)
+
     def test_search_only_or_duplicate_shard_is_never_accepted(self) -> None:
         results = self.all_results(UNSAT_STATUS)
         results[0][1]["proof_mode"] = "search-only"
@@ -166,9 +210,21 @@ class RestrictedGrowthShardCoverageTest(unittest.TestCase):
             aggregate_results(results)
 
         results = self.all_results(UNSAT_STATUS)
-        results[-1] = ("duplicate", self.shard_result("011", UNSAT_STATUS))
+        results[-1] = self.checked_result("011", UNSAT_STATUS)
         with self.assertRaises(AggregationError):
             aggregate_results(results)
+
+    def test_sat_cannot_hide_malformed_or_unarchived_evidence(self) -> None:
+        sat = self.checked_result("010", SAT_STATUS)
+        malformed = self.checked_result("000", UNSAT_STATUS)
+        malformed[2]["rgs_prefix"] = "001"
+        with self.assertRaises(AggregationError):
+            aggregate_results([sat, malformed])
+
+        unarchived_sat = self.checked_result("010", SAT_STATUS)
+        unarchived_sat[2]["archive_outcome"] = "failure"
+        with self.assertRaises(AggregationError):
+            aggregate_results([unarchived_sat])
 
 
 class AdjacentColumnLexTest(unittest.TestCase):

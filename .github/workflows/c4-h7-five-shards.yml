@@ -181,28 +181,41 @@ jobs:
           else
             echo '- Runner did not create result.json.' >> "$GITHUB_STEP_SUMMARY"
           fi
-      - uses: actions/upload-artifact@v6
+      - id: archive
+        uses: actions/upload-artifact@v6
         if: always()
+        continue-on-error: true
         with:
           name: exact-c4-k2-h7-shard-${{ matrix.rgs_prefix }}
           path: out/
           if-no-files-found: error
           retention-days: 90
-      - name: Upload the small shard summary for exact aggregation
-        uses: actions/upload-artifact@v6
-        if: always()
-        with:
-          name: exact-c4-k2-h7-shard-summary-${{ matrix.rgs_prefix }}
-          path: out/result.json
-          if-no-files-found: error
-          retention-days: 90
-      - name: Require an independently verified shard result
+      - name: Validate and package the shard summary envelope
         if: always()
         env:
+          ARCHIVE_OUTCOME: ${{ steps.archive.outcome }}
           RUNNER_EXIT: ${{ steps.compute.outputs.exit_code }}
           RGS_PREFIX: ${{ matrix.rgs_prefix }}
         run: |
-          test "$RUNNER_EXIT" = 0
+          mkdir -p shard-summary
+          if ! test -f out/result.json; then
+            jq -n --arg prefix "$RGS_PREFIX" '
+              {
+                schema: 1,
+                problem: {
+                  colors: 4,
+                  empty_columns: 2,
+                  height: 7,
+                  rgs_prefix: $prefix
+                },
+                proof_mode: "checked-drat",
+                status: "WORKFLOW_STAGE_FAILED",
+                verified: false,
+                stages: {},
+                error: "runner did not create result.json"
+              }
+            ' > out/result.json
+          fi
           jq -e --arg prefix "$RGS_PREFIX" '
             .schema == 1 and
             .problem.colors == 4 and
@@ -210,24 +223,36 @@ jobs:
             .problem.height == 7 and
             .problem.rgs_prefix == $prefix and
             .proof_mode == "checked-drat" and
-            .verified == true and
-            .stages.cadical.timed_out == false and
-            (
-              (
-                .status == "UNSAT_VERIFIED" and
-                .stages.cadical.exit_code == 20 and
-                .stages.drat_trim.exit_code == 0 and
-                .stages.drat_trim.timed_out == false
-              ) or (
-                .status == "SAT_VERIFIED_NO_INSTANCE" and
-                .stages.cadical.exit_code == 10 and
-                .stages.dimacs_model_check.exit_code == 0 and
-                .stages.decode.exit_code == 0 and
-                .stages.water_oracle.exit_code == 0 and
-                .stages.water_verify.exit_code == 0
-              )
-            )
+            (.status | type == "string") and
+            (.verified | type == "boolean")
           ' out/result.json
+          cp out/result.json shard-summary/result.json
+          if test "$RUNNER_EXIT" = 0; then
+            compute_outcome=success
+          else
+            compute_outcome=failure
+          fi
+          jq -n \
+            --arg prefix "$RGS_PREFIX" \
+            --arg runner_exit "$RUNNER_EXIT" \
+            --arg compute_outcome "$compute_outcome" \
+            --arg archive_outcome "$ARCHIVE_OUTCOME" '
+              {
+                schema: 1,
+                rgs_prefix: $prefix,
+                runner_exit: $runner_exit,
+                compute_outcome: $compute_outcome,
+                archive_outcome: $archive_outcome
+              }
+            ' > shard-summary/envelope.json
+      - name: Upload the small shard summary for exact aggregation
+        uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: exact-c4-k2-h7-shard-summary-${{ matrix.rgs_prefix }}
+          path: shard-summary/
+          if-no-files-found: error
+          retention-days: 90
 
   aggregate:
     name: Combine all five checked shards
@@ -275,10 +300,8 @@ jobs:
         env:
           AGGREGATE_EXIT: ${{ steps.combine.outputs.exit_code }}
           PREPARE_RESULT: ${{ needs.prepare.result }}
-          SHARDS_RESULT: ${{ needs.shards.result }}
         run: |
           test "$PREPARE_RESULT" = success
-          test "$SHARDS_RESULT" = success
           test "$AGGREGATE_EXIT" = 0
           jq -e '
             .verified == true and
