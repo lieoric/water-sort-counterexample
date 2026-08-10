@@ -1,0 +1,135 @@
+name: Check the c4 k2 h7 Tq sibling forks
+run-name: Complete same-z Tq sibling-fork check
+
+on:
+  push:
+    branches: [codex/c4-h7-tq-sibling-forks]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: c4-h7-tq-sibling-forks-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Configure the Release build
+        run: >-
+          cmake -S . -B build
+          -DCMAKE_BUILD_TYPE=Release
+          -DWSC_WARNINGS_AS_ERRORS=ON
+      - name: Build the targeted checker and independent oracles
+        run: >-
+          cmake --build build
+          --target water-c4-h7-tq-sibling-forks water-oracle water-verify
+          --parallel 2
+      - name: Run the focused C++ unit test
+        run: >-
+          ctest --test-dir build --output-on-failure
+          --no-tests=error
+          -R '^water-c4-h7-tq-sibling-forks-smoke$'
+      - name: Run the program self-test
+        run: |
+          mkdir -p out
+          set -o pipefail
+          build/water-c4-h7-tq-sibling-forks --self-test 2>&1 | tee out/self-test.log
+      - name: Run the independent checker against the program
+        run: |
+          set -o pipefail
+          python tests/check_c4_h7_tq_sibling_forks.py \
+            --program build/water-c4-h7-tq-sibling-forks \
+            --json out/independent-audit.json 2>&1 \
+            | tee out/checker-program.log
+      - name: Exercise the bounded incomplete path
+        run: |
+          set -o pipefail
+          build/water-c4-h7-tq-sibling-forks \
+            --limit 32 \
+            --output-dir out/limited 2>&1 | tee out/limited.log
+          python scripts/validate_c4_h7_tq_sibling_forks_report.py \
+            --report out/limited/report.json \
+            --output-dir out/limited \
+            --audit out/independent-audit.json \
+            --status-file out/limited/status.txt
+          test "$(tr -d '\r\n' < out/limited/status.txt)" = "INCOMPLETE"
+      - name: Check every same-z Tq sibling fork
+        run: |
+          set -o pipefail
+          build/water-c4-h7-tq-sibling-forks \
+            --output-dir out 2>&1 | tee out/run.log
+      - name: Independently audit checkpoint decisions and replay escapes
+        run: |
+          set -o pipefail
+          python tests/check_c4_h7_tq_sibling_forks.py \
+            --report out/report.json \
+            --json out/independent-report-audit.json 2>&1 \
+            | tee out/checker-report.log
+      - name: Strictly validate the result schema and artifacts
+        run: >-
+          python scripts/validate_c4_h7_tq_sibling_forks_report.py
+          --report out/report.json
+          --output-dir out
+          --audit out/independent-report-audit.json
+          --status-file out/status.txt
+      - name: Record the exact claim boundary
+        run: |
+          status=$(tr -d '\r\n' < out/status.txt)
+          if test "$status" = "ENTRY_FAMILY_ELIMINATED"; then
+            echo '> Every residual word at the targeted entry checkpoints is YES, so this entry family is eliminated. This is not a claim that every c4/k2/h7 layout is YES.' >> "$GITHUB_STEP_SUMMARY"
+          elif test "$status" = "RESIDUALS_EXPORTED"; then
+            echo '> The residual-word universe is completely classified, but local-NO residuals still require prefix completion. This is not a global NO.' >> "$GITHUB_STEP_SUMMARY"
+          elif test "$status" = "INCOMPLETE"; then
+            echo '> This run is incomplete and makes no YES/NO claim.' >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Independently certify any reported global NO
+        run: |
+          status=$(tr -d '\r\n' < out/status.txt)
+          if test "$status" = "GLOBAL_NO_FOUND"; then
+            set -o pipefail
+            build/water-oracle \
+              --input out/no-instance.txt \
+              --count 1 \
+              --certificate out/no-instance.wscert 2>&1 | tee out/oracle.log
+            grep -q '^border_sequences=0 ' out/oracle.log
+            grep -qx 'UNSOLVABLE' out/oracle.log
+            test -s out/no-instance.wscert
+            build/water-verify \
+              --input out/no-instance.txt \
+              --certificate out/no-instance.wscert 2>&1 | tee out/verifier.log
+            grep -qx 'VALID NO CERTIFICATE' out/verifier.log
+          fi
+      - name: Create and verify the SHA-256 manifest
+        if: always()
+        run: |
+          mkdir -p out
+          find out -type f ! -name SHA256SUMS -print0 \
+            | sort -z \
+            | xargs -0 -r sha256sum > out/SHA256SUMS
+          sha256sum --check out/SHA256SUMS
+      - name: Add the result to the run summary
+        if: always()
+        run: |
+          if test -f out/report.md; then
+            cat out/report.md >> "$GITHUB_STEP_SUMMARY"
+          fi
+          if test -f out/SHA256SUMS; then
+            echo '```text' >> "$GITHUB_STEP_SUMMARY"
+            cat out/SHA256SUMS >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: c4-h7-tq-sibling-forks-${{ github.run_id }}
+          path: out/
+          if-no-files-found: error
+          retention-days: 30
