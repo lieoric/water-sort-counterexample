@@ -1,0 +1,86 @@
+name: Audit c4 h7 global bypass lemmas
+run-name: Check the critical-pair, anchor-pair, and rainbow-lift reductions
+
+on:
+  push:
+    branches: [codex/c4-h7-global-bypass]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: c4-h7-global-bypass-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  mathematical-reductions:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Compile the independent audit programs
+        run: >-
+          python -m py_compile
+          tests/check_c4_h7_critical_pair_bypass.py
+          tests/check_c4_h7_rainbow_lift.py
+          tests/check_c4_h7_anchor_pair_potential.py
+      - name: Build the certified first-exhaustion census producer
+        run: |
+          cmake -S . -B build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DWSC_WARNINGS_AS_ERRORS=ON
+          cmake --build build \
+            --target water-c4-h7-tq-exhaust-siblings --parallel 2
+      - name: Rebuild the complete first-exhaustion ledger
+        run: |
+          mkdir -p out/anchor
+          build/water-c4-h7-tq-exhaust-siblings \
+            --output-dir out/anchor
+          test "$(jq -r .status out/anchor/report.json)" = NEXT_RUN_CENSUS_COMPLETE
+      - name: Check every stated critical-pair and past-bypass formula
+        run: |
+          mkdir -p out/critical
+          set -o pipefail
+          python tests/check_c4_h7_critical_pair_bypass.py 2>&1 \
+            | tee out/critical/audit.log
+      - name: Check rainbow factorization and exact token-lift fixtures
+        run: |
+          mkdir -p out/rainbow
+          set -o pipefail
+          python tests/check_c4_h7_rainbow_lift.py \
+            --json out/rainbow/audit.json 2>&1 \
+            | tee out/rainbow/audit.log
+      - name: Check the two-anchor potential and its complete ledger
+        run: |
+          set -o pipefail
+          python tests/check_c4_h7_anchor_pair_potential.py \
+            --report out/anchor/report.json 2>&1 \
+            | tee out/anchor/potential-audit.json
+      - name: Record the exact claim boundary
+        run: |
+          cat >> "$GITHUB_STEP_SUMMARY" <<'EOF'
+          These checks certify three mathematical reductions: the exact
+          critical-pair disable formula plus the past/future bypass, the
+          two-anchor vector potential and first-sweep inequalities, and the
+          rainbow-transversal/token-error formula. They deliberately do not
+          claim universal c4/k2/h7 solvability.
+          EOF
+      - name: Hash the complete audit bundle
+        if: always()
+        run: |
+          mkdir -p out
+          find out -type f ! -name SHA256SUMS -print0 \
+            | sort -z \
+            | xargs -0 -r sha256sum > out/SHA256SUMS
+          sha256sum --check out/SHA256SUMS
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: c4-h7-global-bypass-audit-${{ github.run_id }}
+          path: out/
+          if-no-files-found: error
+          retention-days: 30
