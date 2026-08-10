@@ -1,0 +1,381 @@
+name: Certify exact c4 k2 trap CNF
+run-name: >-
+  Exact trap CNF ${{ github.event_name == 'push' && 'bootstrap h8,h6,h7' || format('h{0} {1}', inputs.height, inputs.proof_mode) }}
+
+on:
+  # workflow_dispatch is available after this file reaches the default branch.
+  # Until then, this branch-specific push performs the complete bootstrap run:
+  # h8 first, then h6 and h7 only after the known h8 SAT case verifies.
+  push:
+    branches: [codex/c4-h7-trap-cnf]
+    paths:
+      - .github/workflows/c4-h7-trap-cnf.yml
+      - scripts/c4_trap_cnf.py
+      - scripts/c4_trap_cnf_requirements.txt
+      - scripts/run_c4_trap_cnf.py
+      - apps/oracle.cpp
+      - apps/verify.cpp
+      - experiments/c4-k2-h8-no-000.txt
+      - include/water_sort/**
+      - src/**
+      - CMakeLists.txt
+  workflow_dispatch:
+    inputs:
+      height:
+        description: Exact fixed height
+        required: true
+        default: "7"
+        type: choice
+        options: ["6", "7", "8"]
+      solver_timeout_minutes:
+        description: CaDiCaL wall-clock limit (with proof limit, at most 300)
+        required: true
+        default: "150"
+        type: string
+      proof_timeout_minutes:
+        description: DRAT limit (solver plus proof minutes must be at most 300)
+        required: true
+        default: "150"
+        type: string
+      proof_mode:
+        description: checked-drat is required for an accepted UNSAT result
+        required: true
+        default: checked-drat
+        type: choice
+        options:
+          - checked-drat
+          - search-only
+
+permissions:
+  contents: read
+
+concurrency:
+  group: exact-c4-k2-trap-cnf-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  # Immutable source revisions.  The workflow also checks the fetched HEADs
+  # and records executable hashes in every run artifact.
+  CADICAL_COMMIT: c60730422e758ef1cebe7aeddf2dda31c996bf04
+  DRAT_TRIM_COMMIT: 2e3b2dc0ecf938addbd779d42877b6ed69d9a985
+
+jobs:
+  prepare:
+    name: Build independent checkers
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: scripts/c4_trap_cnf_requirements.txt
+      - name: Install pinned CNF encoder dependency
+        run: python -m pip install --disable-pip-version-check -r scripts/c4_trap_cnf_requirements.txt
+      - name: Statically check the exact generator and runner
+        run: |
+          python -m py_compile scripts/c4_trap_cnf.py scripts/run_c4_trap_cnf.py
+          python scripts/c4_trap_cnf.py --help
+          python scripts/run_c4_trap_cnf.py --help
+      - name: Generate a tiny structural smoke formula
+        run: |
+          mkdir -p smoke
+          python scripts/c4_trap_cnf.py generate \
+            --height 2 \
+            --cnf smoke/problem.cnf \
+            --map smoke/problem.map.json \
+            --metadata smoke/metadata.json
+          jq -e '
+            .counts.non_goal_states == 5 and
+            .counts.guarded_transitions == 16 and
+            .expected.non_goal_states == 5 and
+            .expected.guarded_transitions == 16
+          ' smoke/metadata.json
+          test "$(head -c 5 smoke/problem.cnf)" = "p cnf"
+      - name: Build and test the Water Sort oracle and certificate verifier
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DWSC_WARNINGS_AS_ERRORS=ON
+          cmake --build build \
+            --target water-oracle water-verify water-sort-tests --parallel 2
+          ctest --test-dir build --output-on-failure -R '^water-sort-tests$'
+      - name: Fetch and build pinned CaDiCaL and DRAT-trim
+        run: |
+          mkdir -p vendor/cadical vendor/drat-trim tools
+
+          git -C vendor/cadical init -q
+          git -C vendor/cadical remote add origin https://github.com/arminbiere/cadical.git
+          git -C vendor/cadical fetch --depth 1 origin "$CADICAL_COMMIT"
+          git -C vendor/cadical checkout --detach FETCH_HEAD
+          test "$(git -C vendor/cadical rev-parse HEAD)" = "$CADICAL_COMMIT"
+          (cd vendor/cadical && ./configure && make -j2)
+
+          git -C vendor/drat-trim init -q
+          git -C vendor/drat-trim remote add origin https://github.com/marijnheule/drat-trim.git
+          git -C vendor/drat-trim fetch --depth 1 origin "$DRAT_TRIM_COMMIT"
+          git -C vendor/drat-trim checkout --detach FETCH_HEAD
+          test "$(git -C vendor/drat-trim rev-parse HEAD)" = "$DRAT_TRIM_COMMIT"
+          make -C vendor/drat-trim drat-trim
+
+          cp build/water-oracle build/water-verify tools/
+          cp vendor/cadical/build/cadical tools/
+          cp vendor/drat-trim/drat-trim tools/
+          chmod +x tools/*
+      - name: Record and package exact toolchain
+        run: |
+          {
+            echo "cadical_commit=$CADICAL_COMMIT"
+            echo "drat_trim_commit=$DRAT_TRIM_COMMIT"
+            echo "cadical_version=$(tools/cadical --version)"
+            echo "compiler=$(c++ --version | head -n 1)"
+            echo "python=$(python --version 2>&1)"
+            python -c "import pysat; print('python_sat=' + pysat.__version__)"
+            python -c "import importlib.metadata as m; print('pypblib=' + m.version('pypblib'))"
+          } > tools/TOOLCHAIN.txt
+          (cd tools && sha256sum cadical drat-trim water-oracle water-verify) \
+            > tools/TOOLCHAIN.sha256
+          tar -czf exact-c4-proof-tools.tar.gz tools
+      - uses: actions/upload-artifact@v6
+        with:
+          name: exact-c4-proof-tools
+          path: exact-c4-proof-tools.tar.gz
+          if-no-files-found: error
+          retention-days: 7
+
+  bootstrap_h8:
+    name: Bootstrap known h8 SAT case
+    if: github.event_name == 'push'
+    needs: prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: scripts/c4_trap_cnf_requirements.txt
+      - name: Install pinned CNF encoder dependency
+        run: python -m pip install --disable-pip-version-check -r scripts/c4_trap_cnf_requirements.txt
+      - uses: actions/download-artifact@v6
+        with:
+          name: exact-c4-proof-tools
+      - name: Extract exact toolchain
+        run: tar -xzf exact-c4-proof-tools.tar.gz
+      - name: Generate, solve, decode, and independently verify h8
+        id: compute
+        run: |
+          set +e
+          python scripts/run_c4_trap_cnf.py \
+            --height 8 \
+            --fix-instance experiments/c4-k2-h8-no-000.txt \
+            --proof-mode checked-drat \
+            --timeout-seconds 2700 \
+            --proof-timeout-seconds 1800 \
+            --out out
+          code=$?
+          set -e
+          echo "exit_code=$code" >> "$GITHUB_OUTPUT"
+      - name: Compress proof and hash every archived file
+        if: always()
+        run: |
+          cp tools/TOOLCHAIN.txt tools/TOOLCHAIN.sha256 out/
+          if test -f out/proof.drat; then
+            (cd out && sha256sum proof.drat > proof.drat.sha256)
+            zstd -T0 -3 --rm out/proof.drat
+          fi
+          (cd out && find . -type f ! -name SHA256SUMS -print0 | \
+            sort -z | xargs -0 -r sha256sum) > out/SHA256SUMS
+      - name: Add checked result to the run summary
+        if: always()
+        run: |
+          echo '## Exact c4 / k2 / h8 bootstrap' >> "$GITHUB_STEP_SUMMARY"
+          echo >> "$GITHUB_STEP_SUMMARY"
+          if test -f out/result.json; then
+            jq -r '"- Status: `\(.status)`\n- Independently verified: `\(.verified)`\n- Claim: \(.claim // .error // "none")"' \
+              out/result.json >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo '- Runner did not create result.json.' >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: exact-c4-k2-h8-bootstrap
+          path: out/
+          if-no-files-found: error
+          retention-days: 90
+      - name: Require the known SAT case and both independent Water Sort checks
+        if: always()
+        env:
+          RUNNER_EXIT: ${{ steps.compute.outputs.exit_code }}
+        run: |
+          test "$RUNNER_EXIT" = 0
+          jq -e '.verified == true and .status == "SAT_VERIFIED_NO_INSTANCE"' \
+            out/result.json
+
+  bootstrap_boundary:
+    name: Bootstrap h${{ matrix.height }} exact boundary
+    if: >-
+      always() && github.event_name == 'push' &&
+      needs.prepare.result == 'success' && needs.bootstrap_h8.result == 'success'
+    needs: [prepare, bootstrap_h8]
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      matrix:
+        height: ["6", "7"]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: scripts/c4_trap_cnf_requirements.txt
+      - name: Install pinned CNF encoder dependency
+        run: python -m pip install --disable-pip-version-check -r scripts/c4_trap_cnf_requirements.txt
+      - uses: actions/download-artifact@v6
+        with:
+          name: exact-c4-proof-tools
+      - name: Extract exact toolchain
+        run: tar -xzf exact-c4-proof-tools.tar.gz
+      - name: Generate, solve, and independently check h${{ matrix.height }}
+        id: compute
+        run: |
+          set +e
+          python scripts/run_c4_trap_cnf.py \
+            --height "${{ matrix.height }}" \
+            --proof-mode checked-drat \
+            --timeout-seconds 9900 \
+            --proof-timeout-seconds 8100 \
+            --out out
+          code=$?
+          set -e
+          echo "exit_code=$code" >> "$GITHUB_OUTPUT"
+      - name: Compress proof and hash every archived file
+        if: always()
+        run: |
+          cp tools/TOOLCHAIN.txt tools/TOOLCHAIN.sha256 out/
+          if test -f out/proof.drat; then
+            (cd out && sha256sum proof.drat > proof.drat.sha256)
+            zstd -T0 -3 --rm out/proof.drat
+          fi
+          (cd out && find . -type f ! -name SHA256SUMS -print0 | \
+            sort -z | xargs -0 -r sha256sum) > out/SHA256SUMS
+      - name: Add checked result to the run summary
+        if: always()
+        run: |
+          echo '## Exact c4 / k2 / h${{ matrix.height }}' >> "$GITHUB_STEP_SUMMARY"
+          echo >> "$GITHUB_STEP_SUMMARY"
+          if test -f out/result.json; then
+            jq -r '"- Status: `\(.status)`\n- Independently verified: `\(.verified)`\n- Claim: \(.claim // .error // "none")"' \
+              out/result.json >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo '- Runner did not create result.json.' >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: exact-c4-k2-h${{ matrix.height }}-bootstrap
+          path: out/
+          if-no-files-found: error
+          retention-days: 90
+      - name: Require an independently verified mathematical result
+        if: always()
+        env:
+          RUNNER_EXIT: ${{ steps.compute.outputs.exit_code }}
+        run: |
+          test "$RUNNER_EXIT" = 0
+          jq -e '.verified == true and
+            (.status == "UNSAT_VERIFIED" or .status == "SAT_VERIFIED_NO_INSTANCE")' \
+            out/result.json
+          if test "${{ matrix.height }}" = 6; then
+            jq -e '.status == "UNSAT_VERIFIED"' out/result.json
+          fi
+
+  dispatched:
+    name: Dispatched h${{ inputs.height }} ${{ inputs.proof_mode }}
+    if: github.event_name == 'workflow_dispatch'
+    needs: prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    env:
+      HEIGHT: ${{ inputs.height }}
+      PROOF_MODE: ${{ inputs.proof_mode }}
+      SOLVER_MINUTES: ${{ inputs.solver_timeout_minutes }}
+      PROOF_MINUTES: ${{ inputs.proof_timeout_minutes }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: scripts/c4_trap_cnf_requirements.txt
+      - name: Install pinned CNF encoder dependency
+        run: python -m pip install --disable-pip-version-check -r scripts/c4_trap_cnf_requirements.txt
+      - uses: actions/download-artifact@v6
+        with:
+          name: exact-c4-proof-tools
+      - name: Extract exact toolchain
+        run: tar -xzf exact-c4-proof-tools.tar.gz
+      - name: Validate numeric limits
+        run: |
+          case "$SOLVER_MINUTES" in ''|*[!0-9]*) exit 2;; esac
+          case "$PROOF_MINUTES" in ''|*[!0-9]*) exit 2;; esac
+          test "$SOLVER_MINUTES" -gt 0
+          test "$PROOF_MINUTES" -gt 0
+          if test "$PROOF_MODE" = checked-drat; then
+            test "$((SOLVER_MINUTES + PROOF_MINUTES))" -le 300
+          else
+            test "$SOLVER_MINUTES" -le 330
+          fi
+      - name: Generate, solve, and independently check dispatched height
+        id: compute
+        run: |
+          set +e
+          python scripts/run_c4_trap_cnf.py \
+            --height "$HEIGHT" \
+            --proof-mode "$PROOF_MODE" \
+            --timeout-seconds "$((SOLVER_MINUTES * 60))" \
+            --proof-timeout-seconds "$((PROOF_MINUTES * 60))" \
+            --out out
+          code=$?
+          set -e
+          echo "exit_code=$code" >> "$GITHUB_OUTPUT"
+      - name: Compress proof and hash every archived file
+        if: always()
+        run: |
+          cp tools/TOOLCHAIN.txt tools/TOOLCHAIN.sha256 out/
+          if test -f out/proof.drat; then
+            (cd out && sha256sum proof.drat > proof.drat.sha256)
+            zstd -T0 -3 --rm out/proof.drat
+          fi
+          (cd out && find . -type f ! -name SHA256SUMS -print0 | \
+            sort -z | xargs -0 -r sha256sum) > out/SHA256SUMS
+      - name: Add checked result to the run summary
+        if: always()
+        run: |
+          echo "## Exact c4 / k2 / h$HEIGHT" >> "$GITHUB_STEP_SUMMARY"
+          echo >> "$GITHUB_STEP_SUMMARY"
+          if test -f out/result.json; then
+            jq -r '"- Status: `\(.status)`\n- Independently verified: `\(.verified)`\n- Claim: \(.claim // .error // "none")"' \
+              out/result.json >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo '- Runner did not create result.json.' >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: exact-c4-k2-h${{ inputs.height }}-${{ github.run_attempt }}
+          path: out/
+          if-no-files-found: error
+          retention-days: 90
+      - name: Require an independently verified result
+        if: always()
+        env:
+          RUNNER_EXIT: ${{ steps.compute.outputs.exit_code }}
+        run: |
+          test "$RUNNER_EXIT" = 0
+          jq -e '.verified == true and
+            (.status == "UNSAT_VERIFIED" or .status == "SAT_VERIFIED_NO_INSTANCE")' \
+            out/result.json
