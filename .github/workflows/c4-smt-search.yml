@@ -1,5 +1,5 @@
-name: Search fixed c4 k2 height with SMT
-run-name: SMT c4 h${{ inputs.height || '6' }} k2 in ${{ inputs.shards || '16' }} shards
+name: Search fixed balanced height with SMT
+run-name: SMT c${{ inputs.colors || '4' }} h${{ inputs.height || '6' }} k${{ inputs.empty_columns || '2' }} in ${{ inputs.shards || '16' }} shards
 
 on:
   # Bootstrap this research workflow before the draft PR reaches main.
@@ -8,10 +8,20 @@ on:
     paths: [.github/workflows/c4-smt-search.yml]
   workflow_dispatch:
     inputs:
+      colors:
+        description: Colors and initially full columns
+        required: true
+        default: "4"
+        type: string
       height:
         description: Fixed stack height
         required: true
         default: "6"
+        type: string
+      empty_columns:
+        description: Initially empty columns
+        required: true
+        default: "2"
         type: string
       shards:
         description: Complete mixed congruence partition
@@ -72,7 +82,9 @@ jobs:
       matrix:
         shard: ${{ fromJSON(needs.prepare.outputs.matrix) }}
     env:
+      COLORS: ${{ inputs.colors || '4' }}
       HEIGHT: ${{ inputs.height || '6' }}
+      EMPTY_COLUMNS: ${{ inputs.empty_columns || '2' }}
       SHARDS: ${{ needs.prepare.outputs.shards }}
       TIMEOUT_MS: ${{ inputs.timeout_ms || '1200000' }}
     steps:
@@ -91,7 +103,7 @@ jobs:
           mkdir -p out
           set -o pipefail
           python scripts/smt_counterexample.py \
-            --height "$HEIGHT" --colors 4 --empty 2 \
+            --height "$HEIGHT" --colors "$COLORS" --empty "$EMPTY_COLUMNS" \
             --shard "${{ matrix.shard }}" --shards "$SHARDS" \
             --timeout-ms "$TIMEOUT_MS" \
             --result out/result.json \
