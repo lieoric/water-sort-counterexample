@@ -55,6 +55,23 @@ jobs:
             --local-no-ledger out/checkpoint/independent-local-no-ledger.jsonl 2>&1 \
             | tee out/checkpoint/independent.log
 
+      - name: Prove the unified all-local-NO bypass symbolically and against the artifact
+        run: |
+          set -o pipefail
+          python tests/check_c4_h7_d2_three_source_all_local_no_bypass.py 2>&1 \
+            | tee out/checkpoint/all-local-no-bypass-symbolic.log
+          python tests/check_c4_h7_d2_three_source_all_local_no_bypass.py \
+            --report out/checkpoint/report.json \
+            --ledger out/checkpoint/local-no-ledger.jsonl 2>&1 \
+            | tee out/checkpoint/all-local-no-bypass-artifact.log
+
+      - name: Verify the sparse early-low continuation kernels
+        run: |
+          set -o pipefail
+          python tests/check_c4_h7_sparse_all_q_continuation.py \
+            --checkpoint-report out/checkpoint/report.json 2>&1 \
+            | tee out/checkpoint/sparse-all-q-continuation.log
+
       - name: Run a bounded past-restoration row differential first
         run: |
           mkdir -p out/past-bounded
