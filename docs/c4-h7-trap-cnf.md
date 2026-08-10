@@ -13,10 +13,19 @@ every colour occurs exactly `h` times globally.
 
 For unrestricted searches, colours are named by order of first appearance in
 the fixed flattened item order: the first item is colour 0, and an occurrence
-of colour `c>0` requires an earlier occurrence of `c-1`.  Every layout has
-exactly such a colour renaming, so this removes only the `4!` duplicate names,
-not any physical instance.  The constraint is disabled when a concrete
-regression instance is fixed by unit clauses.
+of colour `c>0` requires an earlier occurrence of `c-1`.  In addition, the four
+top-to-bottom column words are constrained to be in nondecreasing
+lexicographic order.  Both constraints are disabled when a concrete regression
+instance is fixed by unit clauses.
+
+The two symmetry breakers are safe together, even though renaming colours can
+change the order of columns.  Consider the full
+`S_4(columns) x S_4(colours)` orbit of a layout and choose its lexicographically
+least flattened top-to-bottom word.  Minimality under colour permutations gives
+the first-occurrence naming rule.  Minimality under column permutations gives
+the sorted column words, since swapping an adjacent inversion would make the
+flattened word smaller.  Thus every joint orbit has a representative satisfying
+both constraints; no physical instance is removed.
 
 For a column, an endpoint `s` in `1..h-1` is active when positions `s-1` and
 `s` have different colours.  It means that the top `s` items have been exposed
