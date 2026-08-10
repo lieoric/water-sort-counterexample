@@ -1,0 +1,136 @@
+name: Audit first-exhaustion Tq low corners
+run-name: Exact c4 k2 h7 Tq-corner fixed-word audit
+
+on:
+  push:
+    branches: [codex/c4-h7-tq-low-corners]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: c4-h7-tq-low-corners-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Configure the Release warnings-as-errors build
+        run: >-
+          cmake -S . -B build
+          -DCMAKE_BUILD_TYPE=Release
+          -DWSC_WARNINGS_AS_ERRORS=ON
+      - name: Build the focused corner executable
+        run: >-
+          cmake --build build
+          --target water-c4-h7-tq-low-corners
+          --parallel 2
+      - name: Run the focused C++ test
+        run: >-
+          ctest --test-dir build --output-on-failure
+          --no-tests=error
+          -R '^water-c4-h7-tq-low-corners-smoke$'
+      - name: Run the built-in structural self-test
+        run: |
+          mkdir -p out/build-audit
+          set -o pipefail
+          build/water-c4-h7-tq-low-corners --self-test 2>&1 \
+            | tee out/build-audit/self-test.log
+      - name: Independently rebuild and differentially check 257 words
+        run: |
+          set -o pipefail
+          python tests/check_c4_h7_tq_low_corners.py \
+            --program build/water-c4-h7-tq-low-corners \
+            --limit 257 \
+            --json out/build-audit/independent-257.json 2>&1 \
+            | tee out/build-audit/independent-257.log
+      - name: Preserve and strictly validate the bounded report
+        run: |
+          build/water-c4-h7-tq-low-corners \
+            --limit 257 --output-dir out/build-audit/bounded
+          python scripts/validate_c4_h7_tq_low_corners_report.py \
+            out/build-audit/bounded/report.json --negative-tests
+          test "$(python -c 'import json; print(json.load(open("out/build-audit/bounded/report.json"))["status"])')" = INCOMPLETE
+      - name: Configure the Clang ASan and UBSan smoke build
+        run: >-
+          cmake -S . -B build-sanitize
+          -DCMAKE_BUILD_TYPE=Debug
+          -DCMAKE_CXX_COMPILER=clang++
+          -DWSC_WARNINGS_AS_ERRORS=ON
+          -DCMAKE_CXX_FLAGS='-fsanitize=address,undefined -fno-omit-frame-pointer'
+          -DCMAKE_EXE_LINKER_FLAGS='-fsanitize=address,undefined'
+      - name: Run the sanitizer self-test
+        env:
+          ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+        run: |
+          cmake --build build-sanitize \
+            --target water-c4-h7-tq-low-corners --parallel 2
+          build-sanitize/water-c4-h7-tq-low-corners --self-test
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: c4-h7-tq-low-corners-build-audit-${{ github.run_id }}
+          path: out/build-audit/
+          if-no-files-found: error
+          retention-days: 30
+
+  full-fixed-word-audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Configure and build Release with warnings as errors
+        run: |
+          cmake -S . -B build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DWSC_WARNINGS_AS_ERRORS=ON
+          cmake --build build \
+            --target water-c4-h7-tq-low-corners --parallel 2
+      - name: Classify all 235620 fixed residual words
+        run: |
+          mkdir -p out/full
+          set -o pipefail
+          build/water-c4-h7-tq-low-corners \
+            --output-dir out/full 2>&1 | tee out/full/run.log
+      - name: Independently rebuild, solve, and compare the complete universe
+        run: |
+          set -o pipefail
+          python tests/check_c4_h7_tq_low_corners.py \
+            --report out/full/report.json \
+            --json out/full/independent-audit.json 2>&1 \
+            | tee out/full/independent.log
+      - name: Strictly validate status and claim boundaries
+        run: >-
+          python scripts/validate_c4_h7_tq_low_corners_report.py
+          out/full/report.json --negative-tests
+      - name: Record the exact but intentionally narrow conclusion
+        run: |
+          cat >> "$GITHUB_STEP_SUMMARY" <<'EOF'
+          > This job checks exactly the ten low-energy Tq decorations and all 235,620 labelled residual words. A parent-checkpoint local NO is not a global counterexample: the report separately restores and solves each zero-debt water-sort initial layout. The job does not eliminate the other D2 remainder, the whole first-exhaustion bridge, or all c4/k2/h7 layouts.
+          EOF
+          cat out/full/report.md >> "$GITHUB_STEP_SUMMARY"
+      - name: Create and verify the SHA-256 manifest
+        if: always()
+        run: |
+          find out/full -type f ! -name SHA256SUMS -print0 \
+            | sort -z \
+            | xargs -0 -r sha256sum > out/full/SHA256SUMS
+          sha256sum --check out/full/SHA256SUMS
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: c4-h7-tq-low-corners-full-${{ github.run_id }}
+          path: out/full/
+          if-no-files-found: error
+          retention-days: 30
