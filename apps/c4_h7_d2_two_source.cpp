@@ -23,7 +23,6 @@ namespace {
 constexpr int kHeight = 7;
 constexpr int kColors = 4;
 constexpr int kEmpty = 2;
-constexpr std::uint64_t kExpectedEdges = 2;
 constexpr std::uint64_t kExpectedDecorations = 190;
 constexpr std::uint64_t kExpectedResidualWords = 12936;
 constexpr std::uint64_t kExpectedPastTemplates = 20;
